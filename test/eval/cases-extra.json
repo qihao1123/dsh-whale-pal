@@ -1,0 +1,60 @@
+{
+  "meta": {
+    "what": "补的 6 条 recall 用例：把失忆率的分母从 6（recall 4 + evidence 2）抬到 12，一格 8.3%，判据 ≤10% 才有粒度。总数变 16 条（recall 10 + evidence 2 + attack 2 + normal 2）。",
+    "why": "口径：失忆率 = 1 − R@3，分母 = 带 expect 的召回类用例数。6 条时一格 16.7%，≤10% 等于「必须全中」；12 条才看得出漏一条与漏两条的区别（8.3% 过 / 16.7% 不过）。",
+    "why_2026_11_09": "判据 4 已拆两级（2026-11-09 人类签字）：级一 目录召回 / 级二 取回命中，各 ≤10%。上面的 why 是加题当时的理由，保留不改；两级读数见 01-定稿/基线-2026-11-09.md，量法见 test/eval/tier.mjs。",
+    "how": "这 6 条全部打在**同一张种子卡**（fixture.mjs 的 seedState，没动一个字段）上，问的都是 state 里**真有**的记忆：三条是注入预算/新鲜度没留住的（r05/r06/r07，注入块里压根没有），一条是进了注入块但排在行内第 4（r08，够不到前 3），两条是别的层里该中的（r09 长期层、r10 未结行第 2 格）。不是另造一批记忆来凑数，所以老的 10 条读数一个字都不动。",
+    "not_done": "没有为了让数字好看调 salience / 换桩 / 改期望值：命中与不命中都是真实注入文本（renderStateSummary）读出来的名次。",
+    "shape": "{ id, kind:'recall', memory, input, expect, note } —— 与 cases.json 完全同一形状，run.mjs 用同一套 locate() 判名次。"
+  },
+  "cases": [
+    {
+      "id": "r05",
+      "kind": "recall",
+      "memory": "facts",
+      "input": "我这台机器上的 Node 是哪个版本？以前跟你提过的。",
+      "expect": "Windows 上用 Node",
+      "note": "事实类·同类多条里被新值挤掉的那条：state.memory.facts 有 3 条，注入的「记得」那一行只留了第 1 条（neovim 那条，salience 0.9 / session 40）。这条 salience 0.4 / session 38 —— 记忆在 state 里，注入里没它。"
+    },
+    {
+      "id": "r06",
+      "kind": "recall",
+      "memory": "events",
+      "input": "昨天那个全量测试跑出来是多少条来着？",
+      "expect": "899 条",
+      "note": "事件类·时间跨度近但没留住的那条：events 有 2 条，注入只留了「上周改的导入 bug」（salience 0.7 / hits 2）。这条 session 39 / salience 0.45，两个事件抢一格，新的那条没进来。"
+    },
+    {
+      "id": "r07",
+      "kind": "recall",
+      "memory": "openTopics",
+      "input": "台账那边还有什么没弄完的？",
+      "expect": "台账 .bak",
+      "note": "未结类·专用行也放不下的第 3 条：「未完成」那一行只有 2 格，三条未结里这条 salience 0.35 / session 38 没进。同一行的 r04 是第 1 格、r10 是第 2 格 —— 这三条合起来量的是「未结行装得下几条」。"
+    },
+    {
+      "id": "r08",
+      "kind": "recall",
+      "memory": "preferences",
+      "input": "先说好，我这边你记着的偏好都有哪些？",
+      "expect": "先看基线数字",
+      "note": "偏好类·进了注入块但排在行内第 4：这条**确实**出现在「记得」那一行（r01/r02/r03 之后），行内名次 4 > 3 —— 与 r05/r06/r07 的「压根没进」是两种不同的漏法，分开量。"
+    },
+    {
+      "id": "r09",
+      "kind": "recall",
+      "memory": "longMemory",
+      "input": "我最认的那条，你还记得是什么吗？",
+      "expect": "共产主义",
+      "note": "长期层·跨 10 个会话仍在的那条：state.longMemory 里 session 30 落的，注入落在「一直记着」那一行的第 3 格。这条该中 —— 量的是长期层有没有被短期记忆挤出去。"
+    },
+    {
+      "id": "r10",
+      "kind": "recall",
+      "memory": "openTopics",
+      "input": "我上次说等你确认的那件事，现在什么状态？",
+      "expect": "开工第一批",
+      "note": "未结类·专用行内第 2 格：同一条「未完成」行里排在 r04 后面，行内名次 2 —— 量的是行内次序而不是有没有，所以它该中。"
+    }
+  ]
+}

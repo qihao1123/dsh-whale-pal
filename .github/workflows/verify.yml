@@ -1,0 +1,23 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    # 跑两个 LTS：代码在两边都验过才算过。node 22 曾经在 `fs.cpSync` 上把进程打死
+    # （0xC0000409，没有异常可 catch），所以复制目录那层是手写的，不是原生实现。
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: 语法 / 导入 / 测试
+        run: node scripts/verify.mjs

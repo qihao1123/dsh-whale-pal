@@ -1,0 +1,6 @@
+# id 必须全局唯一且与包名一致。这里用包名本身 `dsh-whale-pal`：
+# 裸名不会和 base 自带的 `@deepseek-ai/dsh-persona`（entry id `persona`）、
+# 工作区里的 `dsh-persona`（entry id `dsh-persona`）撞车。
+- insert:
+    - id: dsh-whale-pal
+      name: dsh-whale-pal

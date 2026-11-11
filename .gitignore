@@ -1,0 +1,24 @@
+# 依赖
+node_modules/
+
+# 演练数据：从本地出厂包拷出来的老库副本，里面是个人笔记，不进仓库
+drill/
+
+# 本地产物
+*.tgz
+*.log
+
+# 运行时数据与备份（插件自己留的，不是源码）
+ledger-state.json
+ledger-state.json.bak-*
+.bak-*
+.bak-archive/
+.retired-persona-framework/
+
+# 编辑器与系统
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+docs/

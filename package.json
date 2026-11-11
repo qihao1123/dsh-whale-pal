@@ -1,0 +1,55 @@
+{
+  "name": "dsh-whale-pal",
+  "version": "0.1.0",
+  "description": "给 DSH（DeepSeek Harness）用的助手插件：人格内核、模式段、记忆与台账、上下文压缩档案、设置页与 /whale 命令。",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "lib",
+    "!lib/persona/test",
+    "!lib/**/*.bak-*",
+    "cordis.patch.yml"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs lib/persona/test/*.test.mjs",
+    "verify": "node scripts/verify.mjs"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "cordis-plugin",
+    "persona",
+    "memory",
+    "context"
+  ],
+  "author": "qihao1123",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/qihao1123/dsh-whale-pal.git"
+  },
+  "homepage": "https://github.com/qihao1123/dsh-whale-pal#readme",
+  "bugs": {
+    "url": "https://github.com/qihao1123/dsh-whale-pal/issues"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [],
+      "platform": "web"
+    }
+  }
+}
