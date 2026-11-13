@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 客户端设置页那一半：模块出口、注册参数、渲染结果、以及它和宿主之间那条 HTTP 契约。
  *
  * 这里不渲染真 DOM：假 react 只把 createElement 收成 {type, props, children} 树，
@@ -30,6 +30,7 @@ const FIXTURE = {
     { key: 'values', label: '价值观', value: '自由、公平', writable: true, multiline: true, hint: CARD_HINT, action: ACTION_FILL },
     { key: 'boundaries', label: '边界', value: '- 不骂人\n- 不接受被骂', writable: true, multiline: true, hint: CARD_HINT, action: ACTION_FILL },
     { key: 'language', label: '说话风格', value: '自然口语', writable: true, multiline: true, hint: CARD_HINT, action: ACTION_FILL },
+    { key: 'summary', label: '总结', value: '一头会记账的鲸', writable: true, multiline: true, hint: CARD_HINT, action: ACTION_FILL },
   ],
   card: { raw: '', chars: 0, at: '' },
   editable: {
@@ -335,12 +336,12 @@ describe('客户端设置页', () => {
     findButton(page.tree, '再读一次')
   })
 
-  it('宿主没给 identity 时用骨架，十项都在、值统一落到空值口径', async () => {
+  it('宿主没给 identity 时用骨架，十一项都在、值统一落到空值口径', async () => {
     const page = await mount(async () =>
       jsonResponse({ ...FIXTURE, identity: [], editable: {}, accounting: {}, imported: null }),
     )
     const text = textOf(page.tree)
-    for (const label of ['名称', '名称的含义', '自称', '自称的含义', '称呼', '称呼的含义', '底色', '价值观', '边界', '说话风格']) {
+    for (const label of ['名称', '名称的含义', '自称', '自称的含义', '称呼', '称呼的含义', '底色', '价值观', '边界', '说话风格', '总结']) {
       assert.ok(text.includes(label), '骨架里应当有 ' + label)
     }
     assert.ok(text.includes('还没写 · 想起来再说'))
@@ -351,11 +352,11 @@ describe('客户端设置页', () => {
 })
 
 
-describe('客户端设置页：人格卡十项', () => {
-  it('十项都渲染，当前值就在控件里，每项一个写入按钮', async () => {
+describe('客户端设置页：人格卡十一项', () => {
+  it('十一项都渲染，当前值就在控件里，每项一个写入按钮', async () => {
     const page = await mount(async () => jsonResponse(FIXTURE))
     const text = textOf(page.tree)
-    for (const label of ['名称', '名称的含义', '自称', '自称的含义', '称呼', '称呼的含义', '底色', '价值观', '边界', '说话风格']) {
+    for (const label of ['名称', '名称的含义', '自称', '自称的含义', '称呼', '称呼的含义', '底色', '价值观', '边界', '说话风格', '总结']) {
       assert.ok(text.includes(label), '应当有 ' + label)
     }
     // 十格全部可改：值直接摆在控件里，不用先去对话里问。
@@ -370,11 +371,11 @@ describe('客户端设置页：人格卡十项', () => {
     const toggles = collect(page.tree).filter((node) => node.type === 'input' && node.props.type === 'checkbox');
     assert.equal(toggles.length, 1, '换库时搬不搬的勾选框')
     assert.equal(toggles[0].props.checked, true, '默认勾上：换库自动搬')
-    assert.equal(areas.length, 5, '底色 / 价值观 / 边界 / 说话风格四个块 + 粘贴区')
+    assert.equal(areas.length, 6, '底色 / 价值观 / 边界 / 说话风格 / 总结五个块 + 粘贴区')
     const writes = collect(page.tree).filter(
       (node) => node.type === 'button' && textOf(node.children) === '写入',
     )
-    assert.equal(writes.length, 10, '十项各有一个写入按钮')
+    assert.equal(writes.length, 11, '十一项各有一个写入按钮')
     assert.ok(text.includes(CARD_HINT))
   })
 
@@ -394,7 +395,7 @@ describe('客户端设置页：人格卡十项', () => {
     const writes = collect(page.rerender()).filter(
       (node) => node.type === 'button' && textOf(node.children) === '写入',
     )
-    // 十项顺序固定，价值观是第 8 项。
+    // 十一项顺序固定，价值观是第 8 项。
     writes[7].props.onClick()
     await settle()
 
@@ -442,7 +443,7 @@ describe('客户端设置页：人格卡十项', () => {
     const writes = collect(page.rerender()).filter(
       (node) => node.type === 'button' && textOf(node.children) === '写入',
     )
-    // 十项顺序固定，称呼是第 5 项（索引 4）。
+    // 十一项顺序固定，称呼是第 5 项（索引 4）。
     assert.equal(writes[4].props.disabled, false, '清空是一次改动，按钮不能灰着')
     writes[4].props.onClick()
     await settle()
@@ -485,6 +486,7 @@ describe('客户端设置页：粘贴拆解', () => {
     ok: true,
     fields: { name: '六一', values: '自由、公平', boundaries: '不骂人' },
     rest: '外貌：短发',
+    sections: [{ title: '外貌', heading: '外貌：短发', text: '', chars: 0 }],
     hits: ['name', 'values', 'boundaries'],
     chars: CARD_TEXT.length,
     total: 20,
@@ -499,7 +501,7 @@ describe('客户端设置页：粘贴拆解', () => {
     return found[0]
   }
 
-  it('拆一下：只发原文，回来填进十项，一个字都不写盘', async () => {
+  it('拆一下：只发原文，回来填进十一项，一个字都不写盘', async () => {
     const page = await mount(async (url, options) => {
       if (url === 'api/whale-pal/status') return jsonResponse(FIXTURE)
       assert.equal(url, 'api/whale-pal/card/parse')
@@ -517,9 +519,9 @@ describe('客户端设置页：粘贴拆解', () => {
     assert.ok(values.includes('六一'), '名称应当被拆出来')
     assert.ok(values.includes('自由、公平'), '价值观应当被拆出来')
     assert.ok(values.includes('不骂人'), '边界应当被拆出来')
-    // 认不出的那几行原样摆在下面，不吞。
+    // 认不出的那部分另开一段原样摆着：不吞，也不冒充进内核。
     const text = textOf(tree)
-    assert.ok(text.includes('这些行没归到任何一项'))
+    assert.ok(text.includes('没进内核'))
     assert.ok(text.includes('外貌：短发'))
     assert.equal(text.includes('拆出 3 项'), true)
     // 只解析不写：这一路没有 /settings。
@@ -529,7 +531,36 @@ describe('客户端设置页：粘贴拆解', () => {
     )
   })
 
+  it('没进内核的段落按标题分开摆，点开是原文', async () => {
+    const page = await mount(async (url) => {
+      if (url === 'api/whale-pal/status') return jsonResponse(FIXTURE)
+      return jsonResponse({
+        ok: true,
+        fields: { name: '六一' },
+        hits: ['name'],
+        chars: 120,
+        total: 2,
+        rest: '【记忆与成长】\n只记真实的事\n开头那句',
+        sections: [
+          { title: '记忆与成长', heading: '【记忆与成长】', text: '只记真实的事', chars: 6 },
+          { title: '', heading: '', text: '开头那句', chars: 4 },
+        ],
+      })
+    })
+    findPaste(page.tree).props.onChange({ target: { value: '名称：六一' } })
+    await settle()
+    findButton(page.rerender(), '拆一下').props.onClick()
+    await settle()
+
+    const text = textOf(page.rerender())
+    assert.ok(text.includes('另有 2 段（10 字）没进内核'), '段数和字数要一起报')
+    assert.ok(text.includes('记忆与成长 · 6 字'), '段落要有名字')
+    assert.ok(text.includes('开头那段 · 4 字'), '开头没标题的那段也要有名字')
+    assert.ok(text.includes('只记真实的事'), '点开要能看见原文')
+  })
+
   it('全部写进去：拆出来的几项一次发完，原文一起存档', async () => {
+
     const page = await mount(async (url) => {
       if (url === 'api/whale-pal/status') return jsonResponse(FIXTURE)
       if (url === 'api/whale-pal/card/parse') return jsonResponse(PARSED)
@@ -568,7 +599,7 @@ describe('客户端设置页：粘贴拆解', () => {
     findButton(page.rerender(), '拆一下').props.onClick()
     await settle()
     const text = textOf(page.rerender())
-    assert.ok(text.includes('一行都没归到十项里'))
+    assert.ok(text.includes('一行都没归到十一项里'))
     assert.ok(text.includes('让模型帮我拆'), '要给出下一步')
   })
 
@@ -584,6 +615,183 @@ describe('客户端设置页：粘贴拆解', () => {
     findButton(page.rerender(), '让模型帮我拆').props.onClick()
     await settle()
     assert.ok(textOf(page.rerender()).includes(hostMessage))
+  })
+
+  it('让模型帮我拆：回来也带段落，拆完段落不会凭空消失', async () => {
+    const page = await mount(async (url) => {
+      if (url === 'api/whale-pal/status') return jsonResponse(FIXTURE)
+      assert.equal(url, 'api/whale-pal/card/split')
+      return jsonResponse({
+        ok: true,
+        fields: { name: '六一' },
+        hits: ['name'],
+        total: 2,
+        rest: '外貌：短发',
+        sections: [{ title: '外貌', heading: '外貌：短发', text: '', chars: 0 }],
+      })
+    })
+    findPaste(page.tree).props.onChange({ target: { value: CARD_TEXT } })
+    await settle()
+    findButton(page.rerender(), '让模型帮我拆').props.onClick()
+    await settle()
+
+    const text = textOf(page.rerender())
+    assert.ok(text.includes('外貌 · 0 字'), '句段要跟着模型拆的结果一起摆出来')
+    assert.ok(text.includes('拆出 1 项'))
+  })
+
+  it('只认出一两项、底下还挂着段落：直说没吃准，指向模型那条', async () => {
+    const page = await mount(async (url) => {
+      if (url === 'api/whale-pal/status') return jsonResponse(FIXTURE)
+      return jsonResponse({
+        ok: true,
+        fields: { name: '六一' },
+        hits: ['name'],
+        total: 2,
+        rest: '外貌：短发',
+        sections: [{ title: '外貌', heading: '外貌：短发', text: '', chars: 0 }],
+      })
+    })
+    findPaste(page.tree).props.onChange({ target: { value: CARD_TEXT } })
+    await settle()
+    findButton(page.rerender(), '拆一下').props.onClick()
+    await settle()
+
+    const text = textOf(page.rerender())
+    assert.ok(text.includes('只认出 1 项'))
+    assert.ok(text.includes('这份写法我没吃准'))
+  })
+
+  it('模型搬进十一项的段：标出去向，不再算「没进内核」', async () => {
+    const page = await mount(async (url) => {
+      if (url === 'api/whale-pal/status') return jsonResponse(FIXTURE)
+      assert.equal(url, 'api/whale-pal/card/split')
+      return jsonResponse({
+        ok: true,
+        fields: { name: '六一', language: '对普通网友保持边界' },
+        hits: ['name', 'language'],
+        total: 20,
+        moves: [{ from: '和不同的人相处', to: 'language' }],
+        unused: [{ from: '每次开口前快速自检', why: '是检查步骤，不是设定' }],
+        rest: '【和不同的人相处】\n普通网友：保持边界\n【每次开口前快速自检】\n我是真的对它有过反应吗',
+        sections: [
+          { title: '和不同的人相处', heading: '【和不同的人相处】', text: '普通网友：保持边界', chars: 8 },
+          { title: '每次开口前快速自检', heading: '【每次开口前快速自检】', text: '我是真的对它有过反应吗', chars: 11 },
+        ],
+      })
+    })
+    findPaste(page.tree).props.onChange({ target: { value: CARD_TEXT } })
+    await settle()
+    findButton(page.rerender(), '让模型帮我拆').props.onClick()
+    await settle()
+
+    const text = textOf(page.rerender())
+    // 段落自己的标签上要写清去了哪一项，并且不再算进「还有几段没进内核」。
+    assert.ok(text.includes('和不同的人相处 · 8 字 → 说话风格'), '被搬走的段要标去向')
+    assert.ok(text.includes('模型把 1 段搬进了十一项'))
+    assert.ok(text.includes('还有 1 段（11 字）没进内核'))
+    // 搬运清单：哪段去了哪项，人拿它和原文核对。
+    assert.ok(text.includes('模型说它这样搬的（1 段）'))
+    assert.ok(text.includes('「和不同的人相处」→ 说话风格'))
+    // 没归的单独列，原因照模型说的写，原文仍在。
+    assert.ok(text.includes('模型没归进十一项的 1 段'))
+    assert.ok(text.includes('每次开口前快速自检 —— 是检查步骤，不是设定'))
+    assert.ok(text.includes('1 段没归进十一项'))
+    // 字段框里是搬完的结果，没写盘。
+    assert.ok(controlValues(page.rerender()).includes('对普通网友保持边界'))
+    assert.equal(
+      page.calls.some((call) => call.url === 'api/whale-pal/settings'),
+      false,
+    )
+  })
+
+  it('模型没回的项：规则拆到的照原文写进去；人加的旧句子只报被盖掉，不偷偷接回来', async () => {
+    const page = await mount(async (url) => {
+      if (url === 'api/whale-pal/status') return jsonResponse(FIXTURE)
+      assert.equal(url, 'api/whale-pal/card/split')
+      return jsonResponse({
+        ok: true,
+        fields: { name: '六一' },
+        hits: ['name'],
+        total: 2,
+        ruleFields: { name: '六一', boundaries: '不骂人' },
+        rest: '外貌：短发',
+        sections: [{ title: '外貌', heading: '外貌：短发', text: '', chars: 0 }],
+      })
+    })
+    findPaste(page.tree).props.onChange({ target: { value: CARD_TEXT } })
+    await settle()
+    findButton(page.rerender(), '让模型帮我拆').props.onClick()
+    await settle()
+
+    const tree = page.rerender()
+    const text = textOf(tree)
+    // 模型跳过一项，不等于原文没写：规则认出来的边界要写进草稿，并且说清是规则补的。
+    assert.ok(text.includes('模型没回 边界，按规则拆的'))
+    assert.ok(text.includes('拆出 2 项'))
+    // 盘上那句「不接受被骂」原文里没有，是人加的：明说这次按原文盖掉了，不接回去。
+    assert.ok(text.includes('边界原来那 1 句原文里没有，这次按原文重写了'))
+    const values = controlValues(tree)
+    assert.ok(values.includes('不骂人'), '规则拆到的边界要写进草稿')
+    assert.equal(
+      values.some((value) => typeof value === 'string' && value.includes('不接受被骂')),
+      false,
+      '旧句子不许被偷偷贴回来',
+    )
+  })
+
+  it('草稿里填过别的：拆一次以这次结果为准，脏内容挡不住规则拆到的项', async () => {
+    const page = await mount(async (url) => {
+      if (url === 'api/whale-pal/status') return jsonResponse(FIXTURE)
+      assert.equal(url, 'api/whale-pal/card/split')
+      return jsonResponse({
+        ok: true,
+        fields: { name: '六一' },
+        hits: ['name'],
+        total: 2,
+        ruleFields: { name: '六一', boundaries: '不骂人' },
+        rest: '外貌：短发',
+        sections: [{ title: '外貌', heading: '外貌：短发', text: '', chars: 0 }],
+      })
+    })
+    findPaste(page.tree).props.onChange({ target: { value: CARD_TEXT } })
+    await settle()
+    const area = collect(page.rerender()).find(
+      (node) => node.type === 'textarea' && node.props.value === '- 不骂人\n- 不接受被骂',
+    )
+    assert.ok(area, '要先找到边界那一格')
+    area.props.onChange({ target: { value: '456456456' } })
+    await settle()
+    findButton(page.rerender(), '让模型帮我拆').props.onClick()
+    await settle()
+
+    const values = controlValues(page.rerender())
+    assert.ok(values.includes('不骂人'), '草稿里的旧值不该挡住这次拆出来的边界')
+    assert.equal(values.some((value) => typeof value === 'string' && value.includes('456456456')), false, '脏内容要被拆出来的结果换掉')
+  })
+
+  it('模型也没拆出来：不劝它自己再来一次，只说十一项要手填', async () => {
+    const page = await mount(async (url) => {
+      if (url === 'api/whale-pal/status') return jsonResponse(FIXTURE)
+      return jsonResponse({
+        ok: true,
+        fields: {},
+        hits: [],
+        total: 0,
+        rest: '你就是我最好的朋友',
+        sections: [{ title: '', heading: '', text: '你就是我最好的朋友', chars: 9 }],
+      })
+    })
+    findPaste(page.tree).props.onChange({ target: { value: '你就是我最好的朋友' } })
+    await settle()
+    findButton(page.rerender(), '让模型帮我拆').props.onClick()
+    await settle()
+
+    const text = textOf(page.rerender())
+    assert.ok(text.includes('模型也没拆出能归到十一项的内容'))
+    assert.ok(text.includes('十一项要手填'))
+    assert.equal(text.includes('这份写法我没吃准'), false, '模型已经拆过了，不许再劝点自己')
+    assert.equal(text.includes('要么点「让模型帮我拆」'), false)
   })
 })
 

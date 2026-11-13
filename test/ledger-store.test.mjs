@@ -219,6 +219,36 @@ describe('台账 · audit 扫描与游标', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it('审计轮转后旧档一起读：lapsed 不会跟着 .1 一起消失', () => {
+    const dir = makeVault();
+    const file = join(dir, 'audit.jsonl');
+    // 轮转之后的盘面：旧内容在 .1，当前文件从新序号开始。
+    writeFileSync(
+      `${file}.1`,
+      `${JSON.stringify(lapsedRecord(7, '轮转前A'))}\n${JSON.stringify(lapsedRecord(8, '轮转前B'))}\n`,
+      'utf8',
+    );
+    writeFileSync(file, `${JSON.stringify(lapsedRecord(9, '轮转后'))}\n`, 'utf8');
+
+    const read = readAuditRecords(file);
+    assert.equal(read.missing, false);
+    assert.equal(read.broken, 0);
+    assert.deepEqual(read.records.map((record) => record.seq), [7, 8, 9]);
+    // 游标停在 7：8、9 是新增，7 已经处理过，不该重复接。
+    assert.deepEqual(
+      scanLapsed({ records: read.records, afterSeq: 7 }).items.map((item) => item.text),
+      ['轮转前B', '轮转后'],
+    );
+
+    // 只有旧档也算读到了：不能因为主文件还没建就当成「没有 audit」。
+    rmSync(file);
+    const onlyOld = readAuditRecords(file);
+    assert.equal(onlyOld.missing, false);
+    assert.deepEqual(onlyOld.records.map((record) => record.seq), [7, 8]);
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
   it('首次扫描有地板：游标 0 时只接最近 firstFloor 条，历史 lapsed 不灌进来', () => {
     // 真机事故复现：几十条历史 lapsed，游标 0，以前会把它们全灌进待交接。
     const records = [lapsedRecord(10, '很旧的'), lapsedRecord(200, '中期的'), lapsedRecord(322, '最近的')];

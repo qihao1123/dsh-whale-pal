@@ -21,7 +21,9 @@ import {
   loadReport,
   loadSteps,
   markCleanExit,
+  markRunStart,
   readRunState,
+  runtimeReport,
 } from '../lib/load.js'
 
 function tempDir(prefix = 'whale-load-') {
@@ -167,7 +169,12 @@ describe('三级失败态与三色', () => {
 
   it('上次没干净退出只记录，不改级别', () => {
     const paths = goodPaths()
-    writeFileSync(paths.runState, JSON.stringify({ status: 'running', at: '2026-01-01T00:00:00.000Z' }), 'utf8')
+    // 文件里是本次启动写的 running；上一次崩过的结论抄在 last 里。
+    writeFileSync(
+      paths.runState,
+      JSON.stringify({ status: 'running', at: '2026-01-02T00:00:00.000Z', last: { status: 'running', at: '2026-01-01T00:00:00.000Z' } }),
+      'utf8',
+    )
     const report = loadReport({ paths, registered })
     assert.equal(report.state, LEVEL.NORMAL)
     assert.equal(report.notes.includes('上次没干净退出，能自愈'), true)
@@ -197,6 +204,78 @@ describe('退出标记', () => {
 
   it('退出标记写不了也不抛：返回 false', () => {
     assert.equal(markCleanExit({ runState: join(tempDir(), 'no', 'such', 'dir', 'run.json') }), false)
+  })
+
+  it('启动先写 running：干净退出之后下一轮认得出', () => {
+    const paths = goodPaths()
+    markCleanExit(paths)
+    markRunStart(paths)
+    assert.equal(readRunState(paths).status, 'running')
+    const report = loadReport({ paths, registered })
+    const line = report.steps.find((step) => step.id === 'selftest').detail
+    assert.ok(line.includes('上次正常退出'), line)
+  })
+
+  it('崩过一次：上一次的 running 被抄进 last，认得出没干净退出', () => {
+    const paths = goodPaths()
+    markRunStart(paths) // 第一次启动
+    markRunStart(paths) // 没退出又启动了：上一次就是崩的
+    const report = loadReport({ paths, registered })
+    const line = report.steps.find((step) => step.id === 'selftest').detail
+    assert.ok(line.includes('上次没干净退出'), line)
+  })
+
+  it('头一回启动：没有上一次，不误报成「没干净退出」', () => {
+    const paths = goodPaths()
+    markRunStart(paths)
+    const report = loadReport({ paths, registered })
+    const line = report.steps.find((step) => step.id === 'selftest').detail
+    assert.ok(line.includes('首次启动'), line)
+  })
+})
+
+describe('运行时那一行', () => {
+  it('念出评估成功率、记忆占用和淘汰条数', () => {
+    const root = tempDir()
+    const audit = join(root, 'audit.jsonl')
+    const rows = [
+      { type: 'assess', detail: { ok: true } },
+      { type: 'assess', detail: { ok: true } },
+      { type: 'assess', detail: { ok: false, error: 'truncated' } },
+      { type: 'update', detail: { changes: [{ op: 'forgot', to: '旧事' }, { op: 'faded', to: '淡掉的事' }] } },
+    ]
+    writeFileSync(audit, rows.map((row) => JSON.stringify(row)).join('\n') + '\n', 'utf8')
+    const state = {
+      memory: { facts: [{ text: '甲' }], preferences: [], events: [], openTopics: [] },
+      longMemory: [],
+      commitments: [],
+    }
+    const runtime = runtimeReport({ auditFile: audit, state })
+    assert.equal(runtime.assessor.sampled, 3)
+    assert.equal(runtime.assessor.ok, 2)
+    assert.equal(runtime.assessor.rate, 66.7)
+    assert.deepEqual(runtime.assessor.topError, { error: 'truncated', count: 1 })
+    assert.equal(runtime.forgot, 1)
+    assert.equal(runtime.faded, 1)
+    const facts = runtime.memory.find((item) => item.key === 'facts')
+    assert.equal(facts.used, 1)
+    assert.equal(facts.cap, 200)
+    assert.match(runtime.summary, /评估器：近 3 次成功 2（66\.7%）/)
+    assert.match(runtime.summary, /记忆：facts 1\/200/)
+    assert.match(runtime.summary, /淘汰 1 条、淡掉 1 条/)
+  })
+
+  it('没有审计文件就说还没有，不编一个 100%', () => {
+    const runtime = runtimeReport({ auditFile: join(tempDir(), 'absent.jsonl'), state: null })
+    assert.equal(runtime.assessor.missing, true)
+    assert.equal(runtime.assessor.rate, null)
+    assert.match(runtime.summary, /还没有审计数据/)
+  })
+
+  it('健康报告默认不带 runtime，问了才算', () => {
+    const paths = goodPaths()
+    assert.equal(loadReport({ paths, registered }).runtime, undefined)
+    assert.ok(loadReport({ paths, registered, runtime: true }).runtime)
   })
 })
 

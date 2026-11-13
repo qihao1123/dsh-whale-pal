@@ -94,6 +94,20 @@ describe('触发点：按已用算，窗口与地板都是运行期值', () => {
     assert.equal(DEFAULT_REMIND_RATIO, 0.2);
     assert.equal(DEFAULT_FLOOR_MARGIN, 0.04);
   });
+
+  it('系数写坏了回默认值：0 不能变成「每轮都压」，超 0.8 不能变成「永不压」', () => {
+    // 这几个系数现在可以从 config.json 来，坏值不该悄悄改变行为。
+    for (const bad of [0, -0.1, 0.8, 1, 2, '0.1', null, undefined, NaN, Infinity]) {
+      const p = triggerPoints({ contextWindow: W1M, ratio: bad, floorMargin: bad });
+      assert.equal(p.trigger, Math.floor(W1M * DEFAULT_RATIO), `ratio=${String(bad)} 应回默认`);
+      assert.equal(p.remind, Math.floor(W1M * DEFAULT_REMIND_RATIO), `floorMargin=${String(bad)} 应回默认`);
+      assert.equal(p.disabled, null, `ratio=${String(bad)} 不该让压缩停用`);
+    }
+    // 边界内的值照收：0.05 是 5%，不是坏值。
+    assert.equal(triggerPoints({ contextWindow: W1M, ratio: 0.05 }).trigger, 50_000);
+    // 地板支上的 10%：地板 20 万 + 50 万的 10% = 25 万，赢过比例支 8 万。
+    assert.equal(triggerPoints({ contextWindow: 500_000, floor: 200_000, floorMargin: 0.1 }).trigger, 250_000);
+  });
 });
 
 describe('到点判定：读数缺失一律不触发', () => {
@@ -172,6 +186,35 @@ describe('主路执行器：到点就压，失败不阻断', () => {
     assert.equal(out.acted, 'compacted');
     assert.equal(calls.length, 1);
     assert.equal(c.stateOf('s2').floor, 40_000, '压完实测值要当地板');
+  });
+
+  it('系数从配置现取：改了下一轮就按新的算，读不出来回默认', () => {
+    const calls = [];
+    let ratio = 0.16;
+    const c = makeCompactor({
+      getCompaction: () => ({ compactNow: () => { calls.push('now'); return {}; } }),
+      getMeter: () => makeMeter([{ totalTokens: 100_000, contextWindow: W1M }]),
+      ratio: () => ratio,
+    });
+    const before = c.run({ agent: makeAgent(), code: 's-coef', turn: 1 });
+    assert.equal(before.acted, 'skipped', '16% 下 10 万还没到 16 万');
+    assert.equal(before.trigger, 160_000);
+
+    ratio = 0.05;
+    const after = c.run({ agent: makeAgent(), code: 's-coef', turn: 2 });
+    assert.equal(after.trigger, 50_000, '改成 5% 后触发点该跟着降');
+    assert.equal(after.acted, 'compacted');
+    assert.equal(calls.length, 1);
+
+    // 取系数时抛错：当没配，用默认值，不许把压缩整条路径带塌。
+    const c2 = makeCompactor({
+      getCompaction: () => ({ compactNow: () => ({}) }),
+      getMeter: () => makeMeter([{ totalTokens: 100_000, contextWindow: W1M }]),
+      ratio: () => { throw new Error('配置读不到'); },
+    });
+    const fallback = c2.run({ agent: makeAgent(), code: 's-coef2', turn: 1 });
+    assert.equal(fallback.trigger, 160_000);
+    assert.equal(fallback.acted, 'skipped');
   });
 
   it('先修剪，削够就不摘要', () => {

@@ -92,8 +92,26 @@ describe('normalizeExtras', () => {
   })
 })
 
-describe('人格卡十项', () => {
-  it('顺序固定，十项全部可写', () => {
+describe('原文存档里的段落', () => {
+  it('没进十项的段落从原文现拆：不落盘，也不算进内核', () => {
+    const raw = ['名称：六一', '【外貌】', '黑色短发', '【和不同的人相处】', '熟人可以更放松'].join('\n')
+    const card = describeCard({ personaCard: { raw, at: '2026-11-13T00:00:00.000Z' } })
+    assert.equal(card.chars, raw.length)
+    assert.deepEqual(card.sections.map((item) => item.title), ['外貌', '和不同的人相处'])
+    assert.equal(card.sections[0].text, '黑色短发')
+    assert.equal(card.sectionChars, '黑色短发'.length + '熟人可以更放松'.length)
+  })
+
+  it('还没存过原文：空数组，不是 null', () => {
+    const card = describeCard({})
+    assert.equal(card.raw, '')
+    assert.deepEqual(card.sections, [])
+    assert.equal(card.sectionChars, 0)
+  })
+})
+
+describe('人格卡十一项', () => {
+  it('顺序固定，十一项全部可写', () => {
     const api = makeApi({ bot_name: 'whale' })
     const rows = describeIdentity(api.getConfig(), api.getState())
     assert.deepEqual(rows.map((row) => row.key), CARD_KEYS)
@@ -108,6 +126,7 @@ describe('人格卡十项', () => {
       '价值观',
       '边界',
       '说话风格',
+      '总结',
     ])
     assert.equal(rows[0].value, 'whale')
     assert.equal(rows[0].writable, true)
@@ -165,7 +184,7 @@ describe('人格卡十项', () => {
     assert.equal(title.hint, COPY.identityHint)
   })
 
-  it('全空的新装状态：十项都可填', () => {
+  it('全空的新装状态：十一项都可填', () => {
     const api = makeApi({})
     api.setState({
       revision: 1,
@@ -176,16 +195,16 @@ describe('人格卡十项', () => {
       commitments: [],
     })
     const rows = describeIdentity(api.getConfig(), api.getState())
-    assert.equal(rows.filter((row) => row.writable).length, 10)
+    assert.equal(rows.filter((row) => row.writable).length, 11)
     assert.deepEqual(rows.filter((row) => row.writable).map((row) => row.key), CARD_KEYS)
     for (const row of rows) {
-      // 说话风格没填时内核用的是默认那句，界面得显示真正生效的值，不能写「还没写」。
-      if (row.key === 'language') assert.equal(row.value.length > 0, true)
-      else assert.equal(row.value, '')
+      // 十一项都不垫默认值：说话风格以前会兜一句「自然口语…」，现在空就是空，
+      // 界面写「还没写」、内核也写「（未填写）」，两边同一份事实。
+      assert.equal(row.value, '')
     }
     // 底色 / 价值观 / 边界 是块，说话风格也是一块：界面按行数不同的控件渲染。
     const blockKeys = rows.filter((row) => row.multiline).map((row) => row.key)
-    assert.deepEqual(blockKeys, ['temperament', 'values', 'boundaries', 'language'])
+    assert.deepEqual(blockKeys, ['temperament', 'values', 'boundaries', 'language', 'summary'])
   })
 })
 
@@ -722,7 +741,7 @@ describe('页脚数字与状态体', () => {
     )
     const payload = describeStatus({ api, importRecord })
     assert.equal(payload.ok, true)
-    assert.equal(payload.identity.length, 10)
+    assert.equal(payload.identity.length, 11)
     // 原文存档这一格：没存过就是空串，不是 undefined。
     assert.equal(payload.card.raw, '')
     assert.equal(payload.card.chars, 0)

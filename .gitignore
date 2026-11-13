@@ -21,4 +21,7 @@ Thumbs.db
 .idea/
 .vscode/
 
-docs/
+# 文档：只放索引与开发指南进仓库；过程文档、交接、对外材料留在本地
+docs/*
+!docs/README.md
+!docs/开发指南.md

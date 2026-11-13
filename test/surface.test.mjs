@@ -14,7 +14,7 @@ import { ANCHOR_ORDER, ANCHOR_SECTION, MODE_ORDER, MODE_SECTION, PROGRESS_ORDER,
 import { resolveDataPaths } from '../lib/paths.js'
 import { ctxRoot, writeCard } from '../lib/ctx/store.js'
 
-function makeApi({ vaultPath = '' } = {}) {
+function makeApi({ vaultPath = '', splitCard } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'whale-surface-'))
   const configPath = join(dir, 'config.json')
   const statePath = join(dir, 'state.json')
@@ -31,7 +31,7 @@ function makeApi({ vaultPath = '' } = {}) {
   writeFileSync(configPath, JSON.stringify(config), 'utf8')
   writeFileSync(statePath, JSON.stringify(state), 'utf8')
   return {
-    paths: { config: configPath, state: statePath },
+    paths: { config: configPath, state: statePath, runState: join(dir, 'run-state.json') },
     getConfig: () => config,
     getState: () => state,
     setConfig(next) {
@@ -45,6 +45,7 @@ function makeApi({ vaultPath = '' } = {}) {
       return state
     },
     buildView: () => ({ state: { revision: state.revision } }),
+    ...(typeof splitCard === 'function' ? { splitCard } : {}),
   }
 }
 
@@ -53,6 +54,7 @@ function makeCtx() {
   const commands = []
   const tools = []
   const sections = []
+  const effects = []
   const ctx = {
     webServer: { register: (route) => (routes.push(route), () => {}) },
     commands: { register: (def) => (commands.push(def), () => {}) },
@@ -60,10 +62,12 @@ function makeCtx() {
     systemPrompt: { section: (def) => (sections.push(def), () => {}) },
     effect(fn) {
       const dispose = fn()
-      return typeof dispose === 'function' ? dispose : () => {}
+      const owned = typeof dispose === 'function' ? dispose : () => {}
+      effects.push(owned)
+      return owned
     },
   }
-  return { ctx, routes, commands, tools, sections }
+  return { ctx, routes, commands, tools, sections, effects }
 }
 
 function callRoute(handler, { url, method = 'GET', body }) {
@@ -111,7 +115,7 @@ describe('健康检查', () => {
     assert.equal(typeof status.json.health.state, 'string')
   })
 
-  it('报告里的挂载数量对得上：路由 1、命令 1、工具 9、本层提示段 3', async () => {
+  it('报告里的挂载数量对得上：路由 1、命令 1、工具 7、本层提示段 3', async () => {
     const { ctx, routes } = makeCtx()
     const api = makeApi()
     registerSurface({ ctx, api, paths: api.paths, log: () => {} })
@@ -119,27 +123,38 @@ describe('健康检查', () => {
     const mounted = health.json.steps.find((step) => step.id === 'mounted')
     assert.match(mounted.detail, /routes 1/)
     assert.match(mounted.detail, /commands 1/)
-    // 八样 + 台账那一个（whale_pal_ledger）+ 记忆取回那一个（whale_pal_memory，第四批）。
-    assert.match(mounted.detail, /tools 9/)
+    // 七样：whale_ctx、身份、台账、进度、回滚、健康、记忆取回。
+    // 「打开笔记」并进 whale_ctx 的 action=open，「库版本」那支工具已删（版本在 /status 里）。
+    assert.match(mounted.detail, /tools 7/)
     // systemPrompt 用 section() 挂载，数 register 会永远是 0。
     // 这里只算这一层注册的：模式 + 进度 + 锚定块；内核与状态两段由 applyPersona 注册。
     assert.match(mounted.detail, /sections 3/)
   })
 
-  it('升级工具：只读，没有 plan/run 这些动作了', async () => {
-    const { ctx, tools } = makeCtx()
+  it('库版本不进工具了：/status 那一格还在，版本号仍从台账那一行读', async () => {
+    const { ctx, routes } = makeCtx()
     const api = makeApi()
     registerSurface({ ctx, api, paths: api.paths, log: () => {} })
-    const upgrade = tools.find((tool) => tool.name === COPY.upgradeToolName)
-    assert.equal(Boolean(upgrade), true)
-    // 第二批把升级引擎整目录删了：工具只剩「查版本」，所以一个参数都没有。
-    assert.deepEqual(Object.keys(upgrade.parameters.properties), [])
-    assert.deepEqual(upgrade.parameters.required ?? [], [])
+    const empty = await callRoute(routes[0].handler, { url: '/api/whale-pal/status' })
+    assert.equal(empty.json.upgrade.ok, true)
+    assert.equal(empty.json.upgrade.never, true)
 
-    // 没库路径：照旧说没升过版，不去猜目录。
-    const noVault = await upgrade.execute({})
-    assert.equal(noVault.ok, true)
-    assert.equal(noVault.never, true)
+    const vault = mkdtempSync(join(tmpdir(), 'whale-upgrade-ver-'))
+    try {
+      mkdirSync(join(vault, '台账'), { recursive: true })
+      writeFileSync(
+        join(vault, '台账', '事件.md'),
+        '| 时间 | 类型 | 发生了什么 |\n| --- | --- | --- |\n| 2026-11-06T00:00:00Z | 任务 | 版本：V4.7 · 升级于 2026-11-06 | 待补 |\n',
+        'utf8',
+      )
+      api.setConfig({ ...api.getConfig(), knowledge: { vaultPath: vault, vaultName: '库' } })
+      const status = await callRoute(routes[0].handler, { url: '/api/whale-pal/status' })
+      assert.equal(status.status, 200)
+      assert.equal(status.json.upgrade.never, false)
+      assert.equal(status.json.upgrade.vaultVersion, 'V4.7')
+    } finally {
+      rmSync(vault, { recursive: true, force: true })
+    }
   })
 
   it('记忆取回工具：list / read / search 三个动作都走真 api 的状态', async () => {
@@ -189,29 +204,6 @@ describe('健康检查', () => {
     assert.equal(bad.ok, false)
   })
 
-  it('升级工具：版本号从台账里那一行读', async () => {
-    const { ctx, tools } = makeCtx()
-    const api = makeApi()
-    const vault = mkdtempSync(join(tmpdir(), 'whale-upgrade-ver-'))
-    try {
-      mkdirSync(join(vault, '台账'), { recursive: true })
-      writeFileSync(
-        join(vault, '台账', '事件.md'),
-        '| 时间 | 类型 | 发生了什么 |\n| --- | --- | --- |\n| 2026-11-06T00:00:00Z | 任务 | 版本：V4.7 · 升级于 2026-11-06 | 待补 |\n',
-        'utf8',
-      )
-      api.setConfig({ ...api.getConfig(), knowledge: { vaultPath: vault, vaultName: '库' } })
-      registerSurface({ ctx, api, paths: api.paths, log: () => {} })
-      const upgrade = tools.find((tool) => tool.name === COPY.upgradeToolName)
-      const shown = await upgrade.execute({})
-      assert.equal(shown.ok, true)
-      assert.equal(shown.never, false)
-      assert.equal(shown.vaultVersion, 'V4.7')
-    } finally {
-      rmSync(vault, { recursive: true, force: true })
-    }
-  })
-
   it('只读降级时写入回 403，且不动文件', async () => {
     const { ctx, routes } = makeCtx()
     const api = makeApi()
@@ -239,7 +231,7 @@ describe('设置路由', () => {
     assert.equal(SETTINGS_ROUTE, '/api/whale-pal')
     const result = await callRoute(surface.handler, { url: '/api/whale-pal/status' })
     assert.equal(result.status, 200)
-    assert.equal(result.json.identity.length, 10)
+    assert.equal(result.json.identity.length, 11)
     // 原文存档那一格：没存过是空串，页面据此显示「还没粘进来内容」。
     assert.equal(result.json.card.raw, '')
     assert.equal(result.json.readOnly, undefined)
@@ -337,6 +329,121 @@ describe('设置路由', () => {
     assert.equal(result.status, 503)
     assert.equal(result.json.ok, false)
     assert.equal(result.json.message, COPY.cardSplitFailed)
+  })
+
+  it('POST /card/split：模型拆完把规则段落一起带回，段落不会凭空消失', async () => {
+    const { ctx } = makeCtx()
+    const api = makeApi({
+      splitCard: async () => ({ ok: true, fields: { name: '六一' }, hits: ['name'], total: 40 }),
+    })
+    const surface = registerSurface({ ctx, api, paths: api.paths, log: () => {} })
+    const result = await callRoute(surface.handler, {
+      url: '/api/whale-pal/card/split',
+      method: 'POST',
+      body: { raw: ['名称：六一', '', '外貌：黑色短发'].join('\n') },
+    })
+    assert.equal(result.status, 200)
+    assert.equal(result.json.ok, true)
+    assert.equal(result.json.fields.name, '六一')
+    assert.equal(result.json.total, 40)
+    // 模型那条只认十项；「没进内核」的段落靠规则拆这一份补上。
+    assert.equal(result.json.rest, '外貌：黑色短发')
+    assert.deepEqual(result.json.sections.map((item) => item.title), ['外貌'])
+    // 规则拆到的那几项也一起回：模型跳过的项，页面拿它补，不用再请求一次。
+    // 规则拆是十项平铺的，没认出的项是空串，页面按空白跳过。
+    assert.equal(result.json.ruleFields.name, '六一')
+    assert.equal(result.json.ruleFields.boundaries, '')
+  })
+
+  it('POST /card/split：模型交代的搬运账一起回给页面', async () => {
+    const { ctx } = makeCtx()
+    const api = makeApi({
+      splitCard: async () => ({
+        ok: true,
+        fields: { name: '六一', language: '对普通网友保持边界' },
+        hits: ['name', 'language'],
+        total: 20,
+        moves: [{ from: '和不同的人相处', to: 'language' }],
+        unused: [{ from: '外貌', why: '没有对应项' }],
+      }),
+    })
+    const surface = registerSurface({ ctx, api, paths: api.paths, log: () => {} })
+    const result = await callRoute(surface.handler, {
+      url: '/api/whale-pal/card/split',
+      method: 'POST',
+      body: { raw: '名称：六一' },
+    })
+    assert.equal(result.status, 200)
+    assert.deepEqual(result.json.moves, [{ from: '和不同的人相处', to: 'language' }])
+    assert.deepEqual(result.json.unused, [{ from: '外貌', why: '没有对应项' }])
+  })
+
+  it('POST /card/split：模型没交代搬运账时给空数组，页面不用防 undefined', async () => {
+    const { ctx } = makeCtx()
+    const api = makeApi({
+      splitCard: async () => ({ ok: true, fields: { name: '六一' }, hits: ['name'], total: 2 }),
+    })
+    const surface = registerSurface({ ctx, api, paths: api.paths, log: () => {} })
+    const result = await callRoute(surface.handler, {
+      url: '/api/whale-pal/card/split',
+      method: 'POST',
+      body: { raw: '名称：六一' },
+    })
+    assert.equal(result.status, 200)
+    assert.deepEqual(result.json.moves, [])
+    assert.deepEqual(result.json.unused, [])
+  })
+
+  it('POST /card/split：失败时把原因接在话后面，不只说「读不懂」', async () => {
+    const { ctx } = makeCtx()
+    const api = makeApi({
+      splitCard: async () => ({ ok: false, error: 'truncated', finish: 'max-tokens', chars: 812 }),
+    })
+    const surface = registerSurface({ ctx, api, paths: api.paths, log: () => {} })
+    const result = await callRoute(surface.handler, {
+      url: '/api/whale-pal/card/split',
+      method: 'POST',
+      body: { raw: '名称：六一' },
+    })
+    assert.equal(result.status, 503)
+    assert.equal(result.json.error, 'truncated')
+    assert.equal(result.json.finish, 'max-tokens')
+    assert.equal(result.json.chars, 812)
+    assert.ok(result.json.message.includes('输出额度用完了'), '原因要能看出来')
+  })
+
+  it('POST /card/split：不认识的失败码原样带上，不吞成「读不懂」', async () => {
+    const { ctx } = makeCtx()
+    const api = makeApi({
+      splitCard: async () => ({ ok: false, error: 'permission denied by upstream' }),
+    })
+    const surface = registerSurface({ ctx, api, paths: api.paths, log: () => {} })
+    const result = await callRoute(surface.handler, {
+      url: '/api/whale-pal/card/split',
+      method: 'POST',
+      body: { raw: '名称：六一' },
+    })
+    assert.equal(result.status, 503)
+    assert.ok(result.json.message.includes('permission denied by upstream'))
+  })
+
+  it('挂载写一笔 running，卸载写一笔 clean：退出标记真有人写', () => {
+    const { ctx, effects } = makeCtx()
+    const api = makeApi()
+    registerSurface({ ctx, api, paths: api.paths, log: () => {} })
+    assert.equal(JSON.parse(readFileSync(api.paths.runState, 'utf8')).status, 'running', '启动这一笔不写，被杀就认不出来')
+    // 卸载钩子由宿主托管：以前只放在返回值里，没人接，一次都没跑过。
+    effects[effects.length - 1]()
+    assert.equal(JSON.parse(readFileSync(api.paths.runState, 'utf8')).status, 'clean')
+  })
+
+  it('路由注册被顶掉：写进 health 的「没挂上」，不只打日志', () => {
+    const { ctx } = makeCtx()
+    const api = makeApi()
+    const clashing = { ...ctx, webServer: { register: () => { throw new Error('webserver: duplicate prefix route "/api/whale-pal"') } } }
+    const surface = registerSurface({ ctx: clashing, api, paths: api.paths, log: () => {} })
+    assert.ok(surface.registered.warnings.join('；').includes('设置路由没挂上'))
+    assert.ok(surface.health().steps.find((step) => step.id === 'mounted').detail.includes('设置路由没挂上'))
   })
 
   it('别的路径 404', async () => {
@@ -989,7 +1096,7 @@ describe('笔记库接线', () => {
     const { ctx, routes, tools } = makeCtx()
     const surface = registerSurface({ ctx, api, paths: api.paths, log: () => {} })
     const handler = routes[0].handler
-    return { api, handler, surface, tool: tools.find((item) => item.name === COPY.openToolName), ...extra }
+    return { api, handler, surface, tool: tools.find((item) => item.name === COPY.ctxToolName), ...extra }
   }
 
   it('GET /status 带上笔记库那一格：装没装、接没接、库名、有没有路径', async () => {
@@ -1005,10 +1112,10 @@ describe('笔记库接线', () => {
     assert.equal(typeof info.label, 'string')
   })
 
-  it('whale_pal_open：有库就回深链，路径里带编码', async () => {
+  it('whale_ctx 的 open：有库就回深链，路径里带编码', async () => {
     const { api, tool } = setup()
     api.setConfig({ ...api.getConfig(), knowledge: { vaultPath: api.paths.config, vaultName: '记忆空间' } })
-    const result = await tool.execute({ relPath: '日记/2026-11-03.md' })
+    const result = await tool.execute({ action: 'open', relPath: '日记/2026-11-03.md' })
     assert.equal(result.ok, true)
     assert.equal(
       result.link,
@@ -1016,18 +1123,18 @@ describe('笔记库接线', () => {
     )
   })
 
-  it('whale_pal_open：没库就拒，不拼一个必然打不开的链接', async () => {
+  it('whale_ctx 的 open：没库就拒，不拼一个必然打不开的链接', async () => {
     const { tool } = setup()
-    const result = await tool.execute({ relPath: '日记/2026-11-03.md' })
+    const result = await tool.execute({ action: 'open', relPath: '日记/2026-11-03.md' })
     assert.equal(result.ok, false)
     assert.equal(result.error, 'vaultPath-required')
     assert.equal(result.message, '还没填笔记库路径，库相关的事都做不了')
   })
 
-  it('whale_pal_open：路径空着也拒，不打开库根目录', async () => {
+  it('whale_ctx 的 open：路径空着也拒，不打开库根目录', async () => {
     const { api, tool } = setup()
     api.setConfig({ ...api.getConfig(), knowledge: { vaultPath: api.paths.config } })
-    const result = await tool.execute({ relPath: '   ' })
+    const result = await tool.execute({ action: 'open', relPath: '   ' })
     assert.equal(result.ok, false)
     assert.equal(result.error, 'relPath-required')
     assert.equal(result.message, COPY.relPathRequired)

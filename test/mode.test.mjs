@@ -306,19 +306,27 @@ describe('整批对齐工作区名', () => {
 })
 
 describe('模式那段提示', () => {
-  it('两条不放松的规矩在任何模式里都在', () => {
+  it('主次排序两种模式正好相反', () => {
+    assert.match(modeText({ mode: 'whale' }), /人格表达在前，任务准确性在后/)
+    assert.match(modeText({ mode: 'assistant' }), /任务准确性在前，人格表达在后/)
+  })
+
+  it('门禁与「不让路」在任何模式里都在', () => {
     for (const mode of ['assistant', 'whale']) {
       const text = modeText({ mode })
       assert.match(text, /门禁与确认口令按字面判/)
       assert.match(text, /不构成确认/)
-      assert.match(text, /事实与证据不许编造/)
-      assert.match(text, /任务进行中自动按助手模式/)
+      assert.match(text, /事实、校验、安全不在这条排序里/)
     }
   })
 
-  it('鲸鲸模式与助手模式的差别只在形式那句', () => {
-    assert.match(modeText({ mode: 'whale' }), /鲸鲸模式/)
-    assert.match(modeText({ mode: 'whale' }), /只改形式/)
-    assert.match(modeText({ mode: 'assistant' }), /助手模式/)
+  it('模式段只定主次，不规定语气', () => {
+    for (const mode of ['assistant', 'whale']) {
+      const text = modeText({ mode })
+      assert.doesNotMatch(text, /不表演情绪/)
+      assert.doesNotMatch(text, /可以短、可以松/)
+      assert.doesNotMatch(text, /只改形式/)
+      assert.doesNotMatch(text, /任务进行中自动按助手模式/)
+    }
   })
 })

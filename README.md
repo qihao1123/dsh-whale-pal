@@ -6,16 +6,17 @@
 
 ## 它做什么
 
-- **人格内核**：名称、称呼、自称、底色、价值观、边界、说话风格——十项，写在系统提示词最前面。名字不预设，没填时用占位名「鲸鲸」，设置页会提示去填；填了就一直用，清空回到占位名。
-- **模式段**：按会话所在目录切「鲸鲸模式 / 助手模式」，两套口气、两套注入内容，同一个插件。
-- **记忆与台账**：你说过的事实、偏好、未完成的事跨会话带着；台账只追加——结论过期不改老行，另起一条「纠正」。
+- **人格内核**：名称、称呼、自称、底色、价值观、边界、说话风格、总结——十一项，写在系统提示词最前面。名字不预设，没填时用占位名「鲸鲸」，设置页会提示去填；填了就一直用，清空回到占位名。
+- **模式段**：按会话所在目录切「鲸鲸模式 / 助手模式」。模式定的是主次：助手模式里任务准确性优先，人格表达让路；鲸鲸模式反过来。两套注入内容，同一个插件。
+- **记忆与台账**：近期记忆（事实、偏好、事件、没办完的事）随 `state.json` 跨会话，但每类都有上限，满了会被更相关的顶掉；长期层只放钉住的条目——说一句「记住这个」会直接钉进去，不参与衰减。台账只追加——结论过期不改老行，另起一条「纠正」。
+- **健康检查带一行实况**：评估器最近的成功率（含最常见的失败原因）、记忆各类占用、最近淘汰了几条——不是只看「挂上了没」。
 - **上下文压缩档案**：DSH 自动压缩时把被压掉的那一段存成一张卡，压完还能按编号把原文取回来。
 - **压缩后仍超阈值，就自己开一个新会话**：助手模式递一张交接条接着干，鲸鲸模式干净开。
-- **一张设置页 + 一组 `/whale` 命令 + 9 个工具**，改人格、换笔记库、查档案都在里面。
+- **一张设置页 + 一组 `/whale` 命令 + 7 个工具**，改人格、换笔记库、查档案都在里面。
 
 ## 安装
 
-需要：DSH 桌面版（Cordis 插件接口）、Node.js ≥ 22、一个 profile。
+需要：DSH 桌面版（Cordis 插件接口）、Node.js ≥ 22、一个 profile。DSH 本体要 `>=0.2.2-rc.3`（写在 `engines.dsh` 里，低于这个版本宿主会拒绝激活，不会带着缺接口的状态硬跑）。
 
 **1. 把包装进 profile 的 `node_modules`**
 
@@ -43,7 +44,7 @@ npm i dsh-whale-pal
 
 ## 五分钟上手
 
-1. **填人格卡。** 设置页十项，能从一段文字里「拆一下」自动填；空白照收，清空就是回默认。
+1. **填人格卡。** 设置页十一项，能从一段文字里「拆一下」自动填；空白照收，清空就空着（只有名字会退回占位名「鲸鲸」）。
 2. **选一个目录当「鲸鲸」的地盘。** `/whale bind` 把当前目录加进名单——在里面开会话就是鲸鲸模式，别处是助手模式。
 3. **看一眼解析结果。** `/whale mode` 告诉你当前目录算哪边、名单里有谁。
 
@@ -62,18 +63,19 @@ npm i dsh-whale-pal
 | `/whale mode` | 看当前目录算哪个模式、名单里有谁 |
 | `/whale bind` / `unbind` | 把工作区加进 / 移出鲸鲸名单 |
 | `/whale new` | 立刻开一个新会话（助手模式带交接条） |
-| `/whale ctx search\|read\|files\|batch\|entries\|sync` | 查上下文档案 |
+| `/whale ctx search\|read\|files\|batch\|entries\|sync\|open` | 查上下文档案、拼一篇笔记的 Obsidian 深链 |
 | `/whale ctx rollback B00x` | 退一批压缩档案，只挪不删（挪进 `_上下文/回收站/`） |
 | `/whale import rollback\|undo` | 回滚 / 撤销旧状态导入 |
 
-工具 9 个：`whale_ctx`、`whale_pal_identity`、`whale_pal_memory`、`whale_pal_ledger`、`whale_pal_progress`、`whale_pal_health`、`whale_pal_open`、`whale_pal_rollback`、`whale_pal_upgrade`。
+工具 7 个：`whale_ctx`、`whale_pal_identity`、`whale_pal_memory`、`whale_pal_ledger`、`whale_pal_progress`、`whale_pal_health`、`whale_pal_rollback`。打开一篇笔记是 `whale_ctx` 的 `action=open`；库版本不进工具，看设置页或台账里那一行。
 
 ## 数据在哪
 
 | 东西 | 位置 |
 | --- | --- |
-| 配置 | `~/.dsh/whale-pal/<profile>/config.json`（`bot_name`、`identity`、`whaleWorkspaces`、`knowledge`、`obsidian`） |
+| 配置 | `~/.dsh/whale-pal/<profile>/config.json`（`bot_name`、`identity`、`whaleWorkspaces`、`knowledge`、`obsidian`、`compaction`） |
 | 状态 | 同目录 `state.json`（自称/称呼、记忆、约定、未完成的事） |
+| 审计 | 同目录 `audit.jsonl`（只追加；超过 4 MB 轮转到 `audit.jsonl.1`，只留一份旧档） |
 | 处理流程进度 | 同目录 `progress.json` |
 | 人格状态快照 | 同目录 `snapshots/`，留最近 20 份 |
 | 导入前的世界 | `~/.dsh/whale-pal/import-snapshots/<profile>/` |
@@ -108,7 +110,7 @@ npm i dsh-whale-pal
 node scripts/verify.mjs     # 语法 + 导入契约 + 单测
 ```
 
-最近一次：**909 条测试（59 个文件）全通过、65 个文件语法通过、`inject` 契约一致**，Node.js 22 与 24 各跑一遍都是这个数，CI 也是这两档矩阵。
+最近一次：**961 条测试（60 个文件）全通过、65 个文件语法通过、`inject` 契约一致**，Node.js 22 与 24 各跑一遍都是这个数，CI 也是这两档矩阵。
 
 换会话那条路 2026-11-12 在真机上验过手动入口（`/whale new`：会话建出来、交接条递进去、落进同一工作区）；自动入口的**触发条件**真机造不出来（要等真压完还超），但触发之后每一步都被测试盖着。
 
@@ -122,6 +124,10 @@ node scripts/verify.mjs     # 语法 + 导入契约 + 单测
 - 模式按目录判，不跟 `session.header.cwd` 走。
 - **平台**：只在 Windows + DSH 桌面版（profile `desktop`）上验过。Linux / macOS 没验过，路径处理和文件锁可能是另一套。
 - 旧插件 `dsh-persona-framework` 还挂在 profile 里时，本插件**拒绝启动**——两套人格同时注入会当场分叉，这不是 bug 是护栏。
+
+## 开发
+
+改代码前看 [docs/开发指南.md](docs/开发指南.md)：目录地图、每个子系统的改动入口、验证命令、不许破的约束、发版流程。仓库根有 `.gitignore` 之外的东西（备份目录、演练夹具）不是源码，别当参考。
 
 ## 许可
 

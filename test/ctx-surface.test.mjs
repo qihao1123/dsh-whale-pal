@@ -128,12 +128,12 @@ describe('接线：投影按 whaleContext 注册，apply 是纯折叠', () => {
 })
 
 describe('接线：whale_ctx 工具', () => {
-  it('九个 action 都在枚举里，且只有 action 是必填', () => {
+  it('十个 action 都在枚举里，且只有 action 是必填', () => {
     const { ctx, tools } = makeCtx()
     const context = registerContext({ ctx, api: makeApi() })
     const def = tools.find((item) => item.name === CTX_TOOL_NAME)
     assert.ok(def, 'whale_ctx 没挂上')
-    assert.deepEqual(def.parameters.properties.action.enum, ['status', 'search', 'read', 'files', 'entries', 'batch', 'sync', 'refresh', 'compact'])
+    assert.deepEqual(def.parameters.properties.action.enum, ['status', 'search', 'read', 'files', 'entries', 'batch', 'sync', 'refresh', 'compact', 'open'])
     assert.deepEqual(def.parameters.required, ['action'])
     // 补录那一路靠 rows：类型锁四类，内容必填。
     assert.deepEqual(def.parameters.properties.rows.items.properties.type.enum, ['事实', '决定', '待办', '偏好'])
@@ -1022,6 +1022,60 @@ describe('接线：一轮收尾自动落盘', () => {
     )
     context.dispose()
   })
+
+  it('触发点系数从 config.compaction 来：改配置就改行为，写坏了回默认', async () => {
+    const base = makeCtx();
+    base.ctx.sessionProjections.stateOf = () => null;
+    const executed = [];
+    base.ctx.commands = {
+      register: () => () => {},
+      execute: async () => {
+        executed.push('/compact');
+        return { commandId: 'cmd-coef', result: { kind: 'success', text: 'Compacted 100 items' } };
+      },
+    };
+    const config = { compaction: { ratio: 0.05 } };
+    const api = { getConfig: () => config, getState: () => ({ revision: 1 }), buildView: () => ({}) };
+
+    const makeAgent = (id) => ({
+      session: { id, eventAt: () => null },
+      inject: () => {},
+      phase: { kind: 'idle' },
+      ctx: {
+        on: () => () => {},
+        // 已用 10 万：5% 触发点是 5 万（已到），16% 是 16 万（没到）。只差系数。
+        tokenMeter: { measure: () => ({ totalTokens: 100000, contextWindow: 1000000 }) },
+        compaction: null,
+        get: () => null,
+      },
+    });
+
+    const context = registerContext({ ctx: base.ctx, api });
+    const runTurn = async (id) => {
+      const agent = makeAgent(id);
+      bootAgent(base, agent);
+      // 必须传同一个 session 对象：宿主按对象认 agent，换个新对象就找不到这一轮的 agent。
+      turnEnd(base, agent.session, 1);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    };
+
+    // 5%：该压。
+    await runTurn('session-coef-low');
+    assert.deepEqual(executed, ['/compact'], '系数改成 5% 之后，10 万就该到点');
+    assert.equal(context.compactState('session-coef-low').compactions, 1);
+
+    // 人把配置改成 16%：同一个读数就不该再压。
+    config.compaction.ratio = 0.16;
+    await runTurn('session-coef-default');
+    assert.deepEqual(executed, ['/compact'], '16% 下 10 万没到点，不该再压');
+    assert.equal(context.compactState('session-coef-default').compactions, 0);
+
+    // 写坏的系数（0）不许变成「每轮都压」：按默认 16% 算，仍然不压。
+    config.compaction.ratio = 0;
+    await runTurn('session-coef-zero');
+    assert.deepEqual(executed, ['/compact'], '坏系数该回默认值，不该让压缩失控');
+    context.dispose();
+  });
 
   it('主路没压成：塞一句「请手动 /compact」，且一个会话只说一次', async () => {
     const base = makeCtx()

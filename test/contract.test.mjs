@@ -148,6 +148,7 @@ describe('客户端清单与源码契约', () => {
     assert.deepEqual([...EDITABLE_KEYS], [
       'vaultPath',
       'obsidianEnabled',
+      'rejectServileAddress',
       'whaleWorkspaces',
       'name',
       'nameMeaning',
@@ -159,6 +160,7 @@ describe('客户端清单与源码契约', () => {
       'values',
       'boundaries',
       'language',
+      'summary',
       'personaCard',
     ])
     // 对话里那条改身份的路仍然只认六个身份键：价值观和边界不是它能动的。
@@ -218,11 +220,13 @@ describe('装配后冒烟', () => {
         'values',
         'boundaries',
         'language',
+        'summary',
       ],
     )
     assert.deepEqual(Object.keys(result.json.editable), [
       'vaultPath',
       'obsidianEnabled',
+      'rejectServileAddress',
       'whaleWorkspaces',
     ])
     assert.equal(result.json.view.state.revision, 5)

@@ -53,6 +53,33 @@ describe('解析：认识标签', () => {
     assert.equal(parsed.fields.name, '六一')
   })
 
+  it('中文方括号标题：整行【标签】，后面可以跟正文', () => {
+    const parsed = parsePersonaCard(
+      ['【性格底色】', '自然、有边界', '【说话方式】用第一人称，称呼对方“你”。', '【边界】不骂人'].join('\n'),
+    )
+    assert.equal(parsed.fields.temperament, '自然、有边界')
+    assert.equal(parsed.fields.language, '用第一人称，称呼对方“你”。')
+    assert.equal(parsed.fields.boundaries, '不骂人')
+    assert.equal(parsed.rest, '')
+  })
+
+  it('中文序号标题：一、标签 和 （一）标签', () => {
+    const parsed = parsePersonaCard(['一、性格底色', '冷淡', '（二）价值观', '自由'].join('\n'))
+    assert.equal(parsed.fields.temperament, '冷淡')
+    assert.equal(parsed.fields.values, '自由')
+  })
+
+  it('单独成行的加粗：认得出的当标题，认不出的留在正文里', () => {
+    const parsed = parsePersonaCard(['**性格底色**', '有点冷淡', '**不要编造**', '这是正文'].join('\n'))
+    assert.equal(parsed.fields.temperament, '有点冷淡\n**不要编造**\n这是正文')
+  })
+
+  it('「表达边界」算边界，不再当成认不出的标签', () => {
+    const parsed = parsePersonaCard(['【表达边界】', '不攻击外貌和人格'].join('\n'))
+    assert.equal(parsed.fields.boundaries, '不攻击外貌和人格')
+    assert.equal(parsed.hits.includes('boundaries'), true)
+  })
+
   it('同一个标签出现两次就合到一项里', () => {
     const parsed = parsePersonaCard(['边界：不骂人', '', '边界：不撒谎'].join('\n'))
     assert.equal(parsed.fields.boundaries, '不骂人\n不撒谎')
@@ -97,6 +124,20 @@ describe('解析：认不出的东西不许被吞掉', () => {
     assert.equal(parsed.rest, '外貌：短头发')
     assert.equal(parsed.fields.name, '六一')
   })
+
+  it('认不出的【】标题也结束上一段：不许被上一项吞掉', () => {
+    const parsed = parsePersonaCard(['【说话方式】', '口语', '【记忆与成长】', '不编造'].join('\n'))
+    assert.equal(parsed.fields.language, '口语')
+    // 记忆与成长没有对应的坑，但它的正文必须出现在 rest 里，不能混进说话方式。
+    assert.equal(parsed.rest, '【记忆与成长】\n不编造')
+  })
+
+  it('内容偏好不是"认不出"：它并进底色，不再另起一段', () => {
+    const parsed = parsePersonaCard(['【性格底色】', '冷淡', '【内容偏好】', '喜欢游戏解说'].join('\n'))
+    assert.equal(parsed.fields.temperament, '冷淡\n喜欢游戏解说')
+    assert.deepEqual(parsed.hits, ['temperament'])
+    assert.deepEqual(parsed.sections, [])
+  })
 })
 
 describe('解析：计数', () => {
@@ -120,6 +161,66 @@ describe('解析：计数', () => {
   })
 })
 
+describe('解析：没进十项的部分切成段落', () => {
+  it('按标题切段，标题名和正文分开，标题行原样留着', () => {
+    const parsed = parsePersonaCard(
+      ['【说话方式】', '口语', '【记忆与成长】', '只记真发生过的', '不要编造'].join('\n'),
+    )
+    assert.deepEqual(
+      parsed.sections.map((s) => [s.title, s.text]),
+      [['记忆与成长', '只记真发生过的\n不要编造']],
+    )
+    assert.equal(parsed.sections[0].heading, '【记忆与成长】')
+    // rest 由 sections 拼回来，两份不会各说一套。
+    assert.equal(parsed.rest, '【记忆与成长】\n只记真发生过的\n不要编造')
+  })
+
+  it('开头没标题的那段单独成段：title 是空串', () => {
+    const parsed = parsePersonaCard(['你是小鲸鱼。', '## 价值观', '自由'].join('\n'))
+    assert.equal(parsed.fields.values, '自由')
+    assert.equal(parsed.sections.length, 1)
+    assert.equal(parsed.sections[0].title, '')
+    assert.equal(parsed.sections[0].text, '你是小鲸鱼。')
+  })
+
+  it('几段连着、中间夹着认得出的标题，各自独立', () => {
+    const parsed = parsePersonaCard(
+      ['【外貌】', '黑色短发', '## 价值观', '自由', '【记忆与成长】', '不编造'].join('\n'),
+    )
+    assert.equal(parsed.fields.values, '自由')
+    assert.deepEqual(
+      parsed.sections.map((s) => s.title),
+      ['外貌', '记忆与成长'],
+    )
+    // 价值观那段正文不许串到前后两段里。
+    assert.equal(parsed.sections[0].text, '黑色短发')
+    assert.equal(parsed.sections[1].text, '不编造')
+  })
+
+  it('每段的 chars 是这级正文的字数，空壳段不产生', () => {
+    const parsed = parsePersonaCard(['## 价值观', '自由', '## 外貌', ''].join('\n'))
+    assert.equal(parsed.sections.length, 1)
+    assert.equal(parsed.sections[0].text, '')
+    assert.equal(parsed.sections[0].chars, 0)
+  })
+
+  it('段内的「普通网友：……」是正文，不被切成六个标题', () => {
+    const parsed = parsePersonaCard(
+      ['【和不同的人相处】', '普通网友：保持边界', '熟人：可以更放松'].join('\n'),
+    )
+    assert.equal(parsed.sections.length, 1)
+    assert.equal(parsed.sections[0].title, '和不同的人相处')
+    assert.equal(parsed.sections[0].text, '普通网友：保持边界\n熟人：可以更放松')
+  })
+
+  it('顶层出现的认不出冒号行，仍然单独成段', () => {
+    const parsed = parsePersonaCard(['外貌：短发', '喜欢下雨天'].join('\n'))
+    assert.equal(parsed.sections.length, 1)
+    assert.equal(parsed.sections[0].title, '外貌')
+    assert.equal(parsed.rest, '外貌：短发\n喜欢下雨天')
+  })
+})
+
 describe('模型拆解的输出收拾', () => {
   it('只认十个键，别的键丢掉', () => {
     const result = validateSplit({
@@ -132,7 +233,18 @@ describe('模型拆解的输出收拾', () => {
 
   it('非字符串的值丢掉，不当成空', () => {
     const result = validateSplit({ fields: { name: 42, values: ['自由'], title: '你' } })
-    assert.deepEqual(result.fields, { title: '你' })
+    assert.deepEqual(result.fields, { values: '自由', title: '你' })
+  })
+
+  it('列表形式的字段按行收：模型把边界写成数组，不许整项丢掉', () => {
+    const result = validateSplit({
+      fields: {
+        name: '六一',
+        boundaries: ['不攻击别人的外貌', 42, '   ', '不泄露隐私'],
+      },
+    })
+    assert.equal(result.fields.boundaries, '不攻击别人的外貌\n不泄露隐私')
+    assert.deepEqual(result.hits, ['name', 'boundaries'])
   })
 
   it('十项全空就当这次没拆出来', () => {
@@ -145,5 +257,46 @@ describe('模型拆解的输出收拾', () => {
   it('没有 fields 外壳时，直接把顶层当字段读', () => {
     const result = validateSplit({ name: '六一', temperament: '自然' })
     assert.deepEqual(result.fields, { name: '六一', temperament: '自然' })
+  })
+
+  it('模型的搬运账：只认十项、认中文叫法，脏数据丢掉', () => {
+    const result = validateSplit({
+      fields: { name: '六一' },
+      moves: [
+        { from: '和不同的人相处', to: 'language' },
+        { from: '记忆与成长', to: '说话' },
+        { from: '外貌', to: 'appearance' },
+        { from: '', to: 'values' },
+        'x',
+        null,
+      ],
+      unused: [
+        { from: '每次开口前快速自检', why: '是检查步骤，不是设定' },
+        { from: '' },
+      ],
+    })
+    assert.deepEqual(result.moves, [
+      { from: '和不同的人相处', to: 'language' },
+      { from: '记忆与成长', to: 'language' },
+    ])
+    assert.deepEqual(result.unused, [{ from: '每次开口前快速自检', why: '是检查步骤，不是设定' }])
+  })
+
+  it('模型没交代搬运账时给空数组，页面照旧能用', () => {
+    const result = validateSplit({ fields: { name: '六一' } })
+    assert.deepEqual(result.moves, [])
+    assert.deepEqual(result.unused, [])
+  })
+
+  it('搬运账里的长句和换行会被截短压平，不让脏数据撑爆界面', () => {
+    const long = '很长的段落标题'.repeat(20)
+    const result = validateSplit({
+      fields: { name: '六一' },
+      moves: [{ from: '第一行\n第二行', to: 'temperament' }],
+      unused: [{ from: long, why: '很长的理由'.repeat(60) }],
+    })
+    assert.equal(result.moves[0].from, '第一行 第二行')
+    assert.equal(result.unused[0].from.length, 40)
+    assert.equal(result.unused[0].why.length, 120)
   })
 })

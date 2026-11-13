@@ -1,6 +1,6 @@
 {
   "name": "dsh-whale-pal",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "给 DSH（DeepSeek Harness）用的助手插件：人格内核、模式段、记忆与台账、上下文压缩档案、设置页与 /whale 命令。",
   "type": "module",
   "main": "index.js",
@@ -18,7 +18,8 @@
     "cordis.patch.yml"
   ],
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.0.0",
+    "dsh": ">=0.2.2-rc.3"
   },
   "scripts": {
     "test": "node --test test/*.test.mjs lib/persona/test/*.test.mjs",
