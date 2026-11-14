@@ -305,3 +305,29 @@ describe('数据目录落在库内时', () => {
     assert.equal(dataDirInsideVault({ root: 'D:\\data' }, ''), false)
   })
 })
+
+describe('健康实况里的「状态没落盘」', () => {
+  it('撞写者闸的审计行会被数进去，不再只在控制台喊', () => {
+    const audit = join(tempDir(), 'audit.jsonl')
+    writeFileSync(
+      audit,
+      [
+        JSON.stringify({ seq: 1, type: 'assess', detail: { ok: true } }),
+        JSON.stringify({ seq: 2, type: 'write-blocked', detail: { reason: 'revision-ahead', diskRevision: 9 } }),
+        JSON.stringify({ seq: 3, type: 'write-blocked', detail: { reason: 'revision-ahead', diskRevision: 10 } }),
+      ].join('\n') + '\n',
+      'utf8',
+    )
+    const report = runtimeReport({ auditFile: audit, state: null })
+    assert.equal(report.blocked, 2)
+    assert.match(report.summary, /2 次状态没落盘/u)
+  })
+
+  it('没有这种行时不吭声，别把「正常」说成异常', () => {
+    const audit = join(tempDir(), 'audit.jsonl')
+    writeFileSync(audit, `${JSON.stringify({ seq: 1, type: 'assess', detail: { ok: true } })}\n`, 'utf8')
+    const report = runtimeReport({ auditFile: audit, state: null })
+    assert.equal(report.blocked, 0)
+    assert.equal(/没落盘/u.test(report.summary), false)
+  })
+})

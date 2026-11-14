@@ -94,7 +94,7 @@ test('旧状态导入一次：计数对得上，第二次不再导', () => {
   }
 })
 
-test('导进来的状态是 v6 的 11 个顶层键', () => {
+test('导进来的状态是 v6 的 13 个顶层键', () => {
   const home = tempHome()
   try {
     writeLegacy(home)
@@ -102,9 +102,11 @@ test('导进来的状态是 v6 的 11 个顶层键', () => {
     ensureStateImported({ ...resolved, log: () => {} })
     const state = JSON.parse(readFileSync(resolved.paths.state, 'utf8'))
     // v6：状态机拆掉后只剩身份 + 记忆 + 承诺 + 审计。
-    // 12 = stateVersion / createdAt / updatedAt / revision / sessionOrdinal /
-    //      selfName / titleName / memory / longMemory / memorySeq / commitments / audit
-    assert.equal(Object.keys(state).length, 12)
+    // 13 = stateVersion / createdAt / updatedAt / revision / sessionOrdinal /
+    //      selfName / titleName / memory / longMemory / memoryTombstones /
+    //      memorySeq / commitments / audit
+    assert.equal(Object.keys(state).length, 13)
+    assert.deepEqual(state.memoryTombstones, [], '新装的墓碑列表是空的，不是缺字段')
     assert.equal(state.memorySeq > 0, true, '导入的记忆条目要补上编号')
     assert.equal(state.selfName.current, 'whale')
     assert.equal(state.commitments[0].text, '答应过')

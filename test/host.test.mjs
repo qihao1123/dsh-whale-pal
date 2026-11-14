@@ -7,11 +7,12 @@ import { test } from 'node:test'
 import { resolveDataPaths } from '../lib/paths.js'
 import { applyPersona } from '../lib/persona/index.js'
 
-// 20 个顶层键：迁移口径就是「一个不多、一个不少」。
+// 13 个顶层键：迁移口径就是「一个不多、一个不少」。
 // 2026-11-07 第四批加 memorySeq（记忆发号器，只增不回收）。
+// 2026-11-15 加 memoryTombstones（淘汰留痕，只记编号/时间/原因，不留正文）。
 const STATE_KEYS = [
   'stateVersion', 'createdAt', 'updatedAt', 'revision', 'sessionOrdinal',
-  'selfName', 'titleName', 'memory', 'longMemory', 'memorySeq', 'commitments', 'audit',
+  'selfName', 'titleName', 'memory', 'longMemory', 'memoryTombstones', 'memorySeq', 'commitments', 'audit',
 ]
 
 function tempHome() {
