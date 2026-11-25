@@ -51,17 +51,18 @@ function makeApi() {
 
 function makeCtx() {
   const routes = []
+  const sections = []
   const ctx = {
     webServer: { register: (route) => (routes.push(route), () => {}) },
     commands: { register: () => () => {} },
     tools: { register: () => () => {} },
-    systemPrompt: { section: () => () => {} },
+    systemPrompt: { section: (spec) => (sections.push(spec), () => {}) },
     effect(fn) {
       const dispose = fn()
       return typeof dispose === 'function' ? dispose : () => {}
     },
   }
-  return { ctx, routes }
+  return { ctx, routes, sections }
 }
 
 function callRoute(handler, { url, method = 'GET', body }) {
@@ -111,12 +112,13 @@ describe('客户端清单与源码契约', () => {
     assert.deepEqual([...declared].sort(), ['commands', 'systemPrompt', 'tools', 'webServer', 'workspaceController'])
   })
 
-  it('客户端只打六条文档相对路由，旧名字一个都不留', () => {
+  it('客户端只打七条文档相对路由，旧名字一个都不留', () => {
     const routes = [...client.matchAll(/["'](api\/[^"']+)["']/g)].map((match) => match[1])
     assert.deepEqual([...new Set(routes)].sort(), [
       'api/whale-pal/card/parse',
       'api/whale-pal/card/split',
       'api/whale-pal/pick',
+      'api/whale-pal/scene',
       'api/whale-pal/settings',
       'api/whale-pal/status',
       'api/whale-pal/workspaces',
@@ -147,7 +149,9 @@ describe('客户端清单与源码契约', () => {
   it('白名单只有一份来源，客户端那份和 settings.js 对齐', () => {
     assert.deepEqual([...EDITABLE_KEYS], [
       'vaultPath',
+      'workRoot',
       'obsidianEnabled',
+      'personaEnabled',
       'rejectServileAddress',
       'whaleWorkspaces',
       'name',
@@ -178,14 +182,16 @@ describe('客户端清单与源码契约', () => {
     assert.match(host, /applySettings\(api, paths, body\)/)
   })
 
-  it('前缀路由只挂 status / workspaces / health / settings / card 两路 / picker / pick / ping 九个分支', () => {
+  it('前缀路由只挂 status / group / workspaces / health / settings / scene / card 两路 / picker / pick / ping 十一个分支', () => {
     assert.equal(SETTINGS_ROUTE, '/api/whale-pal')
     const branches = [...host.matchAll(/rest === '([^']+)'/g)].map((match) => match[1])
     assert.deepEqual(branches, [
       '/status',
+      '/group',
       '/workspaces',
       '/health',
       '/settings',
+      '/scene',
       '/card/parse',
       '/card/split',
       '/picker',
@@ -197,7 +203,7 @@ describe('客户端清单与源码契约', () => {
 })
 
 describe('装配后冒烟', () => {
-  it('GET /status 200，四条只读 key 固定', async () => {
+  it('GET /status 200，六条只读 key 固定', async () => {
     const { ctx, routes } = makeCtx()
     const api = makeApi()
     const surface = registerSurface({ ctx, api, paths: api.paths, log: () => {} })
@@ -225,7 +231,9 @@ describe('装配后冒烟', () => {
     )
     assert.deepEqual(Object.keys(result.json.editable), [
       'vaultPath',
+      'workRoot',
       'obsidianEnabled',
+      'personaEnabled',
       'rejectServileAddress',
       'whaleWorkspaces',
     ])
@@ -245,5 +253,25 @@ describe('装配后冒烟', () => {
     assert.equal(result.status, 200)
     assert.equal(result.json.ok, true)
     assert.deepEqual(result.json.applied, ['name'])
+  })
+
+  it('人格开关关掉：模式与进度两段不出字，档案锚定块照旧注册', () => {
+    const { ctx, sections } = makeCtx()
+    const api = makeApi()
+    registerSurface({ ctx, api, paths: api.paths, log: () => {} })
+    const section = (name) => sections.find((item) => item.name === name)
+    const mode = section('whale-pal/mode')
+    const progress = section('whale-pal/progress')
+    const anchor = section('whale-pal/anchor')
+    assert.ok(mode && progress && anchor, '三段都该注册上')
+
+    // 开着：模式段有字（助手模式下也至少给一句口径）。
+    assert.notEqual(mode.text({}).trim(), '')
+
+    // 关掉：配置一改，下一轮渲染立刻空。锚定块属于上下文压缩，不跟着关。
+    api.getConfig().persona = { enabled: false }
+    assert.equal(mode.text({}), '')
+    assert.equal(progress.text(), '')
+    assert.equal(typeof anchor.text(), 'string')
   })
 })

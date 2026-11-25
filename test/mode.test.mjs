@@ -106,6 +106,19 @@ describe('按目录定模式', () => {
   it('空名单里全是助手', () => {
     assert.equal(resolveMode({ config: {}, cwd: 'D:\\任意' }), 'assistant')
   })
+
+  it('新会话起手选了鲸鲸预设就是鲸鲸，目录不在名单里也算', () => {
+    assert.equal(resolveMode({ config, cwd: 'D:\\AI 项目\\别的项目', preset: 'whale' }), 'whale')
+    assert.equal(resolveMode({ config: {}, cwd: '', preset: 'whale' }), 'whale')
+    assert.equal(resolveMode({ preset: 'whale' }), 'whale')
+  })
+
+  it('别的预设不改变判定，仍旧只看目录', () => {
+    assert.equal(resolveMode({ config, cwd: 'D:\\AI 项目\\别的项目', preset: 'standard' }), 'assistant')
+    assert.equal(resolveMode({ config, cwd: 'D:\\AI 项目\\聊天', preset: 'minimal' }), 'whale')
+    assert.equal(resolveMode({ config, cwd: 'D:\\AI 项目\\别的项目', preset: '' }), 'assistant')
+    assert.equal(resolveMode({ config, cwd: 'D:\\AI 项目\\别的项目', preset: null }), 'assistant')
+  })
 })
 
 describe('名单增删', () => {

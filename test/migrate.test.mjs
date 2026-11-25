@@ -94,22 +94,27 @@ test('旧状态导入一次：计数对得上，第二次不再导', () => {
   }
 })
 
-test('导进来的状态是 v6 的 13 个顶层键', () => {
+test('导进来的状态是 v8 的 15 个顶层键', () => {
   const home = tempHome()
   try {
     writeLegacy(home)
     const resolved = resolveDataPaths({ dshHome: home, profile: 'desktop' })
     ensureStateImported({ ...resolved, log: () => {} })
     const state = JSON.parse(readFileSync(resolved.paths.state, 'utf8'))
-    // v6：状态机拆掉后只剩身份 + 记忆 + 承诺 + 审计。
-    // 13 = stateVersion / createdAt / updatedAt / revision / sessionOrdinal /
-    //      selfName / titleName / memory / longMemory / memoryTombstones /
-    //      memorySeq / commitments / audit
-    assert.equal(Object.keys(state).length, 13)
+    // v8：v6 的身份 + 记忆 + 承诺 + 审计，再加场景树（P0）与通用层请求（P3）。
+    // 15 = stateVersion / createdAt / updatedAt / revision / sessionOrdinal /
+    //      selfName / titleName / memory / scenes / sceneRequests / longMemory /
+    //      memoryTombstones / memorySeq / commitments / audit
+    assert.equal(Object.keys(state).length, 15)
     assert.deepEqual(state.memoryTombstones, [], '新装的墓碑列表是空的，不是缺字段')
+    assert.deepEqual(state.sceneRequests, [], '刚开局没有待决定的事项')
     assert.equal(state.memorySeq > 0, true, '导入的记忆条目要补上编号')
     assert.equal(state.selfName.current, 'whale')
     assert.equal(state.commitments[0].text, '答应过')
+    // 导入的老记忆没有场景，全部落在主人层；树只有主人根节点。
+    assert.equal(state.memory.facts.every((entry) => entry.scene === 'owner'), true)
+    assert.equal(state.scenes.root.id, 'owner')
+    assert.deepEqual(state.scenes.projects, [])
   } finally {
     rmSync(home, { recursive: true, force: true })
   }

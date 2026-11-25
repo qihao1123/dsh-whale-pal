@@ -7,12 +7,14 @@ import { test } from 'node:test'
 import { resolveDataPaths } from '../lib/paths.js'
 import { applyPersona } from '../lib/persona/index.js'
 
-// 13 个顶层键：迁移口径就是「一个不多、一个不少」。
+// 15 个顶层键：迁移口径就是「一个不多、一个不少」。
 // 2026-11-07 第四批加 memorySeq（记忆发号器，只增不回收）。
 // 2026-11-15 加 memoryTombstones（淘汰留痕，只记编号/时间/原因，不留正文）。
+// 2026-11-20 记忆分层 P0 加 scenes（场景树），P3 加 sceneRequests（通用层满了的请求）。
 const STATE_KEYS = [
   'stateVersion', 'createdAt', 'updatedAt', 'revision', 'sessionOrdinal',
-  'selfName', 'titleName', 'memory', 'longMemory', 'memoryTombstones', 'memorySeq', 'commitments', 'audit',
+  'selfName', 'titleName', 'memory', 'scenes', 'sceneRequests', 'longMemory', 'memoryTombstones', 'memorySeq',
+  'commitments', 'audit',
 ]
 
 function tempHome() {
@@ -83,6 +85,22 @@ test('注入仍是两段，名字与顺序不变', () => {
     assert.equal(typeof persona[0].text(), 'string')
     assert.equal(typeof persona[1].text(), 'string')
     assert.equal(new Set(sections.map((s) => s.name)).size, sections.length, '同一段不该注册两次')
+  } finally {
+    rmSync(home, { recursive: true, force: true })
+  }
+})
+
+test('人格开关关掉：内核与状态摘要两段都不出字，注册还在', () => {
+  const { home, sections, api } = setup()
+  try {
+    const persona = sections.filter((s) => s.name === 'whale-pal/kernel' || s.name === 'whale-pal/state')
+    assert.notEqual(persona[0].text(), '', '开着时内核那段该有字')
+    api.setConfig({ ...api.getConfig(), persona: { enabled: false } }, 'test')
+    assert.equal(persona[0].text(), '')
+    assert.equal(persona[1].text(), '')
+    // 数据一条没删：把开关拨回去，字立刻回来。
+    api.setConfig({ ...api.getConfig(), persona: { enabled: true } }, 'test')
+    assert.notEqual(persona[0].text(), '')
   } finally {
     rmSync(home, { recursive: true, force: true })
   }

@@ -1,5 +1,5 @@
 /**
- * 台账落盘层与 audit 扫描：只读不建、幂等不重写、游标与轮转、坏行不拖垮。
+ * 台账落盘层与 audit 扫描：只读不建、幂等不重写、地板与轮转、坏行不拖垮。
  * 口径出处：`融合计划-v2.md` §7 第 3/5 条、§13（库路径由调用方给，不探测不预填）、§3.2。
  *
  * 一律用 mkdtempSync 的临时目录：真库 `D:\AI 空间\记忆空间` 一个字节都不许动。
@@ -16,17 +16,13 @@ import { handoffCells, handoffKey, lapsedItems, scanLapsed } from '../lib/ledger
 import {
   appendToBook,
   bookPath,
-  defaultLedgerState,
   ensureBook,
   ledgerCounts,
   ledgerRoot,
-  ledgerStatePath,
   patchBook,
   readAuditRecords,
-  readLedgerState,
   rowsInBook,
   vaultProblem,
-  writeLedgerState,
 } from '../lib/ledger/store.js';
 
 function makeVault() {
@@ -50,16 +46,14 @@ function lapsedRecord(seq, text, at = '2026-11-04T04:40:59.078Z') {
 }
 
 describe('台账 · 只许这一层碰盘', () => {
-  it('lib/ledger 与 lib/rhythm 里只有两个 store.js import node:fs', () => {
+  it('lib/ledger 里只有 store.js 一个 import node:fs', () => {
     const root = process.cwd();
     const offenders = [];
-    for (const dir of ['lib/ledger', 'lib/rhythm']) {
-      for (const name of readdirSync(join(root, dir))) {
-        if (name.endsWith('.js') === false) continue;
-        if (name === 'store.js') continue;
-        const body = readFileSync(join(root, dir, name), 'utf8');
-        if (/from 'node:fs'/u.test(body)) offenders.push(`${dir}/${name}`);
-      }
+    for (const name of readdirSync(join(root, 'lib/ledger'))) {
+      if (name.endsWith('.js') === false) continue;
+      if (name === 'store.js') continue;
+      const body = readFileSync(join(root, 'lib/ledger', name), 'utf8');
+      if (/from 'node:fs'/u.test(body)) offenders.push(`lib/ledger/${name}`);
     }
     assert.deepEqual(offenders, []);
   });
@@ -72,8 +66,6 @@ describe('台账 · 只许这一层碰盘', () => {
       'lib/ledger/books.js',
       'lib/ledger/event.js',
       'lib/ledger/lapse.js',
-      'lib/rhythm/period.js',
-      'lib/rhythm/plan.js',
     ]) {
       const body = readFileSync(join(root, file), 'utf8');
       if (/Date\.now\(|process\.env/u.test(body)) offenders.push(file);
@@ -85,12 +77,10 @@ describe('台账 · 只许这一层碰盘', () => {
     const root = process.cwd();
     const banned = ['记忆空间', '萃', '软晚安', '母体', '自举'];
     const offenders = [];
-    for (const dir of ['lib/ledger', 'lib/rhythm']) {
-      for (const name of readdirSync(join(root, dir))) {
-        if (name.endsWith('.js') === false) continue;
-        const body = readFileSync(join(root, dir, name), 'utf8');
-        for (const word of banned) if (body.includes(word)) offenders.push(`${dir}/${name}:${word}`);
-      }
+    for (const name of readdirSync(join(root, 'lib/ledger'))) {
+      if (name.endsWith('.js') === false) continue;
+      const body = readFileSync(join(root, 'lib/ledger', name), 'utf8');
+      for (const word of banned) if (body.includes(word)) offenders.push(`lib/ledger/${name}:${word}`);
     }
     assert.deepEqual(offenders, []);
   });
@@ -179,24 +169,24 @@ describe('台账 · 重跑不重复写', () => {
     rmSync(vault, { recursive: true, force: true });
   });
 
-  it('五本账的读数与文件都在台账/下面', () => {
+  it('四本账的读数与文件都在台账/下面', () => {
     const vault = makeVault();
     appendToBook({ vaultPath: vault, book: '偏离', cells: { 场景: '归档', 偏离: '按标签猜', 原因: '', 改法: '' } });
     appendToBook({ vaultPath: vault, book: '异议', cells: { 时间: '2026-11-05', 议题: 'x', 我的看法: 'a', 你的看法: 'b' } });
     const counts = ledgerCounts(vault);
     assert.equal(counts.ok, true);
-    assert.deepEqual(counts.books, { 事件: 0, 偏离: 1, 异议: 1, 待交接: 0, 待提醒: 0 });
+    assert.deepEqual(counts.books, { 事件: 0, 偏离: 1, 异议: 1, 待交接: 0 });
     assert.equal(counts.root, ledgerRoot(vault));
     assert.deepEqual(
       readdirSync(ledgerRoot(vault)).filter((name) => name.endsWith('.md')).sort(),
       ['偏离.md', '异议.md'],
     );
-    assert.equal(BOOKS.length, 5);
+    assert.equal(BOOKS.length, 4);
     rmSync(vault, { recursive: true, force: true });
   });
 });
 
-describe('台账 · audit 扫描与游标', () => {
+describe('台账 · audit 扫描', () => {
   it('读 audit：坏行单独计数，不当整份坏掉', () => {
     const dir = makeVault();
     const file = join(dir, 'audit.jsonl');
@@ -205,15 +195,15 @@ describe('台账 · audit 扫描与游标', () => {
     assert.equal(read.ok, true);
     assert.equal(read.records.length, 2);
     assert.equal(read.broken, 1);
-    const scan = scanLapsed({ records: read.records, afterSeq: 0 });
+    const scan = scanLapsed({ records: read.records });
     assert.deepEqual(
       scan.items.map((item) => item.text),
       ['A', 'B'],
     );
     assert.equal(scan.maxSeq, 4);
-    // 只认新增：游标推到 3 就只剩 4 那条。
+    // 地板能把下界抬起来：只接最近的那条。
     assert.deepEqual(
-      scanLapsed({ records: read.records, afterSeq: 3 }).items.map((item) => item.key),
+      scanLapsed({ records: read.records, firstFloor: 1 }).items.map((item) => item.key),
       [handoffKey({ seq: 4, i: 1 })],
     );
     rmSync(dir, { recursive: true, force: true });
@@ -234,10 +224,10 @@ describe('台账 · audit 扫描与游标', () => {
     assert.equal(read.missing, false);
     assert.equal(read.broken, 0);
     assert.deepEqual(read.records.map((record) => record.seq), [7, 8, 9]);
-    // 游标停在 7：8、9 是新增，7 已经处理过，不该重复接。
+    // 没有游标：两档一起读，从 0 扫就是全部三条，顺序与写入顺序一致。
     assert.deepEqual(
-      scanLapsed({ records: read.records, afterSeq: 7 }).items.map((item) => item.text),
-      ['轮转前B', '轮转后'],
+      scanLapsed({ records: read.records }).items.map((item) => item.text),
+      ['轮转前A', '轮转前B', '轮转后'],
     );
 
     // 只有旧档也算读到了：不能因为主文件还没建就当成「没有 audit」。
@@ -245,19 +235,24 @@ describe('台账 · audit 扫描与游标', () => {
     const onlyOld = readAuditRecords(file);
     assert.equal(onlyOld.missing, false);
     assert.deepEqual(onlyOld.records.map((record) => record.seq), [7, 8]);
+    assert.deepEqual(
+      scanLapsed({ records: onlyOld.records }).items.map((item) => item.text),
+      ['轮转前A', '轮转前B'],
+    );
 
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('首次扫描有地板：游标 0 时只接最近 firstFloor 条，历史 lapsed 不灌进来', () => {
-    // 真机事故复现：几十条历史 lapsed，游标 0，以前会把它们全灌进待交接。
+  it('有地板：只接最近 firstFloor 条，历史 lapsed 不灌进来', () => {
+    // 真机事故复现：几十条历史 lapsed 一次全灌进待交接。
     const records = [lapsedRecord(10, '很旧的'), lapsedRecord(200, '中期的'), lapsedRecord(322, '最近的')];
-    const noFloor = scanLapsed({ records, afterSeq: 0 });
+    const noFloor = scanLapsed({ records });
     assert.equal(noFloor.items.length, 3);
     assert.equal(noFloor.floored, false);
+    assert.equal(noFloor.from, 0);
 
     // 地板 200 → 下界 122，只接 200 与 322。
-    const floored = scanLapsed({ records, afterSeq: 0, firstFloor: 200 });
+    const floored = scanLapsed({ records, firstFloor: 200 });
     assert.equal(floored.floored, true);
     assert.equal(floored.from, 122);
     assert.deepEqual(
@@ -267,17 +262,9 @@ describe('台账 · audit 扫描与游标', () => {
     assert.equal(floored.maxSeq, 322);
 
     // 历史比地板短时不抬：没有「历史」可挡。
-    const short = scanLapsed({ records, afterSeq: 0, firstFloor: 9999 });
+    const short = scanLapsed({ records, firstFloor: 9999 });
     assert.equal(short.floored, false);
     assert.equal(short.items.length, 3);
-
-    // 有游标时地板不生效：正常增量不受影响。
-    const incremental = scanLapsed({ records, afterSeq: 200, firstFloor: 200 });
-    assert.equal(incremental.floored, false);
-    assert.deepEqual(
-      incremental.items.map((item) => item.text),
-      ['最近的'],
-    );
   });
 
   it('audit 不存在不算错', () => {
@@ -285,15 +272,6 @@ describe('台账 · audit 扫描与游标', () => {
     assert.equal(read.ok, true);
     assert.equal(read.missing, true);
     assert.deepEqual(read.records, []);
-  });
-
-  it('轮转后从 0 重扫（账上有键去重，重扫不会重复写）', () => {
-    const scan = scanLapsed({ records: [lapsedRecord(1, 'A'), lapsedRecord(2, 'B')], afterSeq: 99 });
-    assert.equal(scan.reset, true);
-    assert.equal(scan.from, 0);
-    assert.equal(scan.items.length, 2);
-    // 没轮转就不重扫。
-    assert.equal(scanLapsed({ records: [lapsedRecord(99, 'A')], afterSeq: 5 }).reset, false);
   });
 
   it('lapsed 只从 changes 里认，别的变更不算', () => {
@@ -315,17 +293,6 @@ describe('台账 · audit 扫描与游标', () => {
   it('交接行：时间抄 audit 的 at、状态默认待处理', () => {
     const item = lapsedItems(lapsedRecord(12, '把文档里那条错命令改掉'))[0];
     assert.deepEqual(handoffCells({ item }), ['2026-11-04T04:40:59.078Z', 'lapse:12#1', '把文档里那条错命令改掉', '待处理']);
-  });
-
-  it('游标落了盘能读回来，坏文件回默认值', () => {
-    const dir = makeVault();
-    const file = ledgerStatePath(dir);
-    assert.deepEqual(readLedgerState(file), defaultLedgerState());
-    writeLedgerState(file, { lapseSeq: 247, lastScanDay: '2026-11-05', updatedAt: '2026-11-05T03:00:00.000Z' });
-    assert.deepEqual(readLedgerState(file), { version: 1, lapseSeq: 247, lastScanDay: '2026-11-05', updatedAt: '2026-11-05T03:00:00.000Z' });
-    writeFileSync(file, '不是 JSON', 'utf8');
-    assert.deepEqual(readLedgerState(file), defaultLedgerState());
-    rmSync(dir, { recursive: true, force: true });
   });
 
   it('写出去的行读回来还是那一行（写后读回同一个口径）', () => {

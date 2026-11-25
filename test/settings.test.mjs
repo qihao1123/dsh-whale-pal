@@ -24,6 +24,7 @@ import {
   describeStatus,
   normalizeExtras,
   validateVaultPath,
+  validateWorkRootPath,
   workspaceKey,
 } from '../lib/settings.js'
 
@@ -68,6 +69,8 @@ describe('normalizeExtras', () => {
     assert.equal(extras.knowledge.vaultPath, '')
     assert.equal(extras.obsidian.enabled, false)
     assert.equal(extras.obsidian.linkMode, 'wiki')
+    // 人格总开关默认开着：老配置里没有这一格，升级后行为不该变。
+    assert.equal(extras.persona.enabled, true)
     assert.deepEqual(extras.identity, { nameMeaning: '', selfNameMeaning: '', titleMeaning: '' })
     assert.equal(extras.onboarding, undefined)
   })
@@ -89,6 +92,36 @@ describe('normalizeExtras', () => {
   it('旧的 identity.meaning 还能兜底到名称的含义', () => {
     const extras = normalizeExtras({ identity: { meaning: '旧键留下的' } })
     assert.equal(extras.identity.nameMeaning, '旧键留下的')
+  })
+})
+
+describe('人格总开关', () => {
+  it('默认开着：没有这一格、或者写坏了，都按开着算', () => {
+    assert.equal(describeEditable({}).personaEnabled.value, true)
+    assert.equal(normalizeExtras({ persona: { enabled: 'yes' } }).persona.enabled, true)
+  })
+
+  it('关掉写进 config.persona.enabled，再读还是关着', () => {
+    const api = makeApi({ bot_name: 'whale' })
+    const result = applySettings(api, api.paths, { personaEnabled: false })
+    assert.equal(result.ok, true)
+    assert.deepEqual(result.applied, ['personaEnabled'])
+    const saved = JSON.parse(readFileSync(api.paths.config, 'utf8'))
+    assert.equal(saved.persona.enabled, false)
+    assert.equal(describeEditable(api.getConfig()).personaEnabled.value, false)
+    // 关掉不删数据：配置里别的字段一个不少。
+    assert.equal(saved.bot_name, 'whale')
+  })
+
+  it('只认布尔：别的值拒收，配置文件不动', () => {
+    const api = makeApi({ bot_name: 'whale' })
+    const before = readFileSync(api.paths.config, 'utf8')
+    const result = applySettings(api, api.paths, { personaEnabled: 'off' })
+    assert.equal(result.ok, false)
+    assert.equal(result.status, 400)
+    assert.equal(result.error, 'personaEnabled-not-boolean')
+    assert.equal(result.message, COPY.personaToggleNotBoolean)
+    assert.equal(readFileSync(api.paths.config, 'utf8'), before)
   })
 })
 
@@ -290,6 +323,88 @@ describe('设施项可改', () => {
     assert.equal(result.ok, false)
     assert.match(result.message, /不是文件夹/)
     assert.equal(result.error, 'vaultPath-not-a-directory')
+  })
+
+  it('工作区总路径：合法目录写进 knowledge.workRoot', () => {
+    const api = makeApi()
+    const dir = mkdtempSync(join(tmpdir(), 'whale-workroot-'))
+    const result = applySettings(api, api.paths, { workRoot: dir })
+    assert.equal(result.ok, true)
+    assert.deepEqual(result.applied, ['workRoot'])
+    const saved = JSON.parse(readFileSync(api.paths.config, 'utf8'))
+    assert.equal(saved.knowledge.workRoot, dir)
+    assert.equal(saved.knowledge.vaultPath, '', '填工作区总路径不该动笔记库')
+  })
+
+  it('工作区总路径：不存在就拒，文案说的是任务工作区', () => {
+    const api = makeApi()
+    const missing = join(tmpdir(), 'whale-workroot-nowhere-71c2')
+    assert.equal(existsSync(missing), false)
+    const result = applySettings(api, api.paths, { workRoot: missing })
+    assert.equal(result.ok, false)
+    assert.equal(result.status, 400)
+    assert.equal(result.error, 'workRoot-not-a-directory')
+    assert.equal(result.message, COPY.workRootMissing)
+    assert.equal(validateWorkRootPath(missing).ok, false)
+  })
+
+  it('工作区总路径：文件不是目录也拒', () => {
+    const api = makeApi()
+    const result = applySettings(api, api.paths, { workRoot: api.paths.config })
+    assert.equal(result.ok, false)
+    assert.equal(result.error, 'workRoot-not-a-directory')
+    assert.equal(result.message, COPY.workRootNotDirectory)
+  })
+
+  it('工作区总路径：空值放行（清空就是关掉派活，不当填错）', () => {
+    const api = makeApi({ bot_name: 'whale', knowledge: { workRoot: 'D:\\旧\\总路径' } })
+    const result = applySettings(api, api.paths, { workRoot: '' })
+    assert.equal(result.ok, true)
+    assert.deepEqual(result.applied, ['workRoot'])
+    const saved = JSON.parse(readFileSync(api.paths.config, 'utf8'))
+    assert.equal(saved.knowledge.workRoot, '')
+    assert.equal(validateWorkRootPath('').ok, true)
+  })
+
+  it('工作区总路径：相对路径拒', () => {
+    const api = makeApi()
+    const result = applySettings(api, api.paths, { workRoot: '任务\\总路径' })
+    assert.equal(result.ok, false)
+    assert.equal(result.error, 'workRoot-not-absolute')
+    assert.equal(result.message, COPY.workRootNotAbsolute)
+  })
+
+  it('工作区总路径：读盘归一与设置页描述都带上它', () => {
+    const extras = normalizeExtras({ knowledge: { workRoot: 'D:\\AI 项目' } })
+    assert.equal(extras.knowledge.workRoot, 'D:\\AI 项目')
+    const api = makeApi({ bot_name: 'whale', knowledge: { workRoot: 'D:\\AI 项目' } })
+    const editable = describeEditable(api.getConfig())
+    assert.equal(editable.workRoot.value, 'D:\\AI 项目')
+    assert.ok(editable.workRoot.placeholder.length > 0)
+  })
+
+  it('工作区总路径：换了以后只提醒「旧的没搬」，第一次填和重复填都不吭声', () => {
+    const api = makeApi()
+    const first = mkdtempSync(join(tmpdir(), 'whale-workroot-a-'))
+    // 第一次填：没有旧目录，不该冒出「换了」的提醒。
+    const firstSave = applySettings(api, api.paths, { workRoot: first })
+    assert.equal(firstSave.ok, true)
+    assert.equal(firstSave.workRootMoved, undefined)
+
+    // 换到另一个目录：把旧的和新的一起带回去，设置页据此说明文件不跟着走。
+    const second = mkdtempSync(join(tmpdir(), 'whale-workroot-b-'))
+    const moved = applySettings(api, api.paths, { workRoot: second })
+    assert.equal(moved.ok, true)
+    assert.deepEqual(moved.workRootMoved, { from: first, to: second })
+
+    // 存同一个值：等于没换，不提醒。
+    const same = applySettings(api, api.paths, { workRoot: second })
+    assert.equal(same.workRootMoved, undefined)
+
+    // 清空也是换了指向，但空值不建工作区，提醒照样要给——人得知道旧文件在哪。
+    const cleared = applySettings(api, api.paths, { workRoot: '' })
+    assert.equal(cleared.ok, true)
+    assert.deepEqual(cleared.workRootMoved, { from: second, to: '' })
   })
 
   it('换库：台账和上下文搬过去，配置指向新库，源不动', () => {

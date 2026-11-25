@@ -1,4 +1,4 @@
-﻿/**
+/**
  * 客户端设置页那一半：模块出口、注册参数、渲染结果、以及它和宿主之间那条 HTTP 契约。
  *
  * 这里不渲染真 DOM：假 react 只把 createElement 收成 {type, props, children} 树，
@@ -174,10 +174,18 @@ function textOf(node) {
   return ''
 }
 
-function findButton(tree, label) {
+/**
+ * 按文案找按钮。默认要求恰好一个（防重名）；
+ * 页面上本来就有两处「选目录」（笔记库、工作区总路径）时传 { any: true }，取第一个。
+ */
+function findButton(tree, label, options = {}) {
   const found = collect(tree).filter(
     (node) => node.type === 'button' && textOf(node.children).includes(label),
   )
+  if (options.any === true) {
+    assert.ok(found.length > 0, '没找到按钮写着 ' + label)
+    return found[0]
+  }
   assert.equal(found.length, 1, '应当恰好有一个按钮写着 ' + label)
   return found[0]
 }
@@ -346,7 +354,7 @@ describe('客户端设置页', () => {
     }
     assert.ok(text.includes('还没写 · 想起来再说'))
     assert.equal(text.includes('链接记法'), false)
-    assert.ok(text.includes('接手记录'))
+    assert.equal(text.includes('接手记录'), false)
     assert.ok(text.includes('记了多少'))
   })
 })
@@ -809,7 +817,7 @@ describe('客户端设置页：选目录', () => {
       throw new Error('不该打这个路由：' + String(url))
     })
 
-    const button = findButton(page.tree, '选目录')
+    const button = findButton(page.tree, '选目录', { any: true })
     await button.props.onClick()
 
     const picked = page.calls.filter((call) => call.url === 'api/whale-pal/pick')
@@ -837,7 +845,7 @@ describe('客户端设置页：选目录', () => {
       (node) => node.type === 'input' && node.props.type === 'checkbox',
     )
     toggle.props.onChange({ target: { checked: false } })
-    await findButton(page.rerender(), '选目录').props.onClick()
+    await findButton(page.rerender(), '选目录', { any: true }).props.onClick()
 
     const settings = page.calls.filter((call) => call.url === 'api/whale-pal/settings')
     assert.deepEqual(JSON.parse(settings[0].options.body), { vaultPath: PICKED, migrateVault: false })
@@ -865,7 +873,8 @@ describe('客户端设置页：选目录', () => {
       throw new Error('不该打这个路由：' + String(url))
     })
 
-    await findButton(page.tree, '选目录').props.onClick()
+    // 第一个「选目录」在笔记库那一组；工作区总路径那个排在它后面。
+    await findButton(page.tree, '选目录', { any: true }).props.onClick()
     const text = textOf(page.rerender())
     assert.ok(text.includes('台账和上下文搬过来了（5 个文件）'), text)
     assert.ok(text.includes('旧库还在原地'), text)
@@ -878,7 +887,7 @@ describe('客户端设置页：选目录', () => {
       throw new Error('不该打这个路由：' + String(url))
     })
 
-    await findButton(page.tree, '选目录').props.onClick()
+    await findButton(page.tree, '选目录', { any: true }).props.onClick()
 
     assert.equal(
       page.calls.filter((call) => call.url === 'api/whale-pal/settings').length,
@@ -898,7 +907,7 @@ describe('客户端设置页：选目录', () => {
       throw new Error('不该打这个路由：' + String(url))
     })
 
-    await findButton(page.tree, '选目录').props.onClick()
+    await findButton(page.tree, '选目录', { any: true }).props.onClick()
 
     assert.equal(page.calls.filter((call) => call.url === 'api/whale-pal/settings').length, 0)
     assert.ok(textOf(page.rerender()).includes(hostMessage))
@@ -910,7 +919,7 @@ describe('客户端设置页：没有原生选择窗口时', () => {
     const page = await mount(async () =>
       jsonResponse({ ...FIXTURE, picker: { ok: true, available: false, kind: null } }),
     )
-    const button = findButton(page.tree, '选目录')
+    const button = findButton(page.tree, '选目录', { any: true })
     assert.equal(button.props.disabled, true)
     assert.ok(textOf(page.tree).includes('这台机器没给我选目录的窗口，路径可以直接粘进来'))
   })
@@ -919,7 +928,7 @@ describe('客户端设置页：没有原生选择窗口时', () => {
     const page = await mount(async () =>
       jsonResponse({ ...FIXTURE, picker: { ok: true, available: true, kind: 'native' } }),
     )
-    const button = findButton(page.tree, '选目录')
+    const button = findButton(page.tree, '选目录', { any: true })
     assert.equal(button.props.disabled, false)
     assert.equal(textOf(page.tree).includes('这台机器没给我选目录的窗口'), false)
   })

@@ -31,7 +31,7 @@ function makeApi({ vaultPath = '', splitCard } = {}) {
   writeFileSync(configPath, JSON.stringify(config), 'utf8')
   writeFileSync(statePath, JSON.stringify(state), 'utf8')
   return {
-    paths: { config: configPath, state: statePath, runState: join(dir, 'run-state.json') },
+    paths: { root: dir, config: configPath, state: statePath, audit: join(dir, 'audit.jsonl'), runState: join(dir, 'run-state.json') },
     getConfig: () => config,
     getState: () => state,
     setConfig(next) {
@@ -115,7 +115,7 @@ describe('健康检查', () => {
     assert.equal(typeof status.json.health.state, 'string')
   })
 
-  it('报告里的挂载数量对得上：路由 1、命令 1、工具 7、本层提示段 3', async () => {
+  it('报告里的挂载数量对得上：路由 1、命令 1、工具 8、本层提示段 3', async () => {
     const { ctx, routes } = makeCtx()
     const api = makeApi()
     registerSurface({ ctx, api, paths: api.paths, log: () => {} })
@@ -123,9 +123,9 @@ describe('健康检查', () => {
     const mounted = health.json.steps.find((step) => step.id === 'mounted')
     assert.match(mounted.detail, /routes 1/)
     assert.match(mounted.detail, /commands 1/)
-    // 七样：whale_ctx、身份、台账、进度、回滚、健康、记忆取回。
+    // 八样：whale_ctx、身份、台账、进度、回滚、健康、记忆取回、派活。
     // 「打开笔记」并进 whale_ctx 的 action=open，「库版本」那支工具已删（版本在 /status 里）。
-    assert.match(mounted.detail, /tools 7/)
+    assert.match(mounted.detail, /tools 8/)
     // systemPrompt 用 section() 挂载，数 register 会永远是 0。
     // 这里只算这一层注册的：模式 + 进度 + 锚定块；内核与状态两段由 applyPersona 注册。
     assert.match(mounted.detail, /sections 3/)
@@ -281,6 +281,75 @@ describe('设置路由', () => {
     })
     assert.equal(result.status, 403)
     assert.equal(result.json.error, 'key-not-allowed')
+  })
+
+  it('POST /settings 存总路径：指挥部在那底下建出来，名字写死', async () => {
+    const { ctx } = makeCtx()
+    const api = makeApi()
+    const root = mkdtempSync(join(tmpdir(), 'whale-chief-'))
+    const created = []
+    ctx.workspaceRegistry = {
+      async resolveByPath() {
+        return null
+      },
+      async create(path, title) {
+        created.push({ path, title })
+        return { id: 'ws-1', path, title }
+      },
+    }
+    const surface = registerSurface({ ctx, api, paths: api.paths, log: () => {} })
+    const result = await callRoute(surface.handler, {
+      url: '/api/whale-pal/settings',
+      method: 'POST',
+      body: { workRoot: root },
+    })
+    assert.equal(result.status, 200)
+    assert.equal(result.json.chief.ok, true)
+    assert.equal(result.json.chief.path, join(root, '指挥部'))
+    assert.deepEqual(created, [{ path: join(root, '指挥部'), title: '指挥部' }])
+    assert.equal(existsSync(join(root, '指挥部')), true, '目录也要真建出来')
+  })
+
+  it('POST /settings 存总路径：宿主没给注册表时保存照样成，只回报没建成', async () => {
+    const { ctx } = makeCtx()
+    const api = makeApi()
+    const root = mkdtempSync(join(tmpdir(), 'whale-chief-none-'))
+    const surface = registerSurface({ ctx, api, paths: api.paths, log: () => {} })
+    const result = await callRoute(surface.handler, {
+      url: '/api/whale-pal/settings',
+      method: 'POST',
+      body: { workRoot: root },
+    })
+    assert.equal(result.status, 200)
+    assert.equal(result.json.chief.ok, false)
+    assert.equal(result.json.chief.message, COPY.chiefNoRegistry)
+    // 保存不被拖下水：配置里已经是新路径。
+    assert.equal(JSON.parse(readFileSync(api.paths.config, 'utf8')).knowledge.workRoot, root)
+  })
+
+  it('POST /settings 改别的项：不碰指挥部', async () => {
+    const { ctx } = makeCtx()
+    const api = makeApi()
+    let called = 0
+    ctx.workspaceRegistry = {
+      async resolveByPath() {
+        called += 1
+        return null
+      },
+      async create() {
+        called += 1
+        return {}
+      },
+    }
+    const surface = registerSurface({ ctx, api, paths: api.paths, log: () => {} })
+    const result = await callRoute(surface.handler, {
+      url: '/api/whale-pal/settings',
+      method: 'POST',
+      body: { name: '鲸鲸' },
+    })
+    assert.equal(result.status, 200)
+    assert.equal(result.json.chief, undefined)
+    assert.equal(called, 0)
   })
 
   it('POST /card/parse 拆一段：回十项 + 其余，不写盘', async () => {
@@ -630,9 +699,36 @@ describe('命令与工具', () => {
     assert.equal(said.kind, 'success')
     // 夹具里没设库：那就该说「没处写」，不许报一堆 0 装成有账。
     assert.match(said.text, /台账|没设库/)
+    assert.equal(said.text.includes('待提醒'), false, '第五本账随节律一起砍了，读数里不该再有它')
     const wild = commands[0].handler({ rawInput: 'ledger 瞎写' })
     assert.equal(wild.kind, 'error')
     assert.match(wild.text, /ledger 只认/)
+  })
+
+  it('/whale ledger scan 按需扫一遍：新捞到的当场列出来，handoffs 接得上', () => {
+    const vault = mkdtempSync(join(tmpdir(), 'whale-ledger-scan-'))
+    const { ctx, commands } = makeCtx()
+    const api = makeApi({ vaultPath: vault })
+    const line = JSON.stringify({
+      seq: 5,
+      at: '2026-11-04T04:40:59.078Z',
+      type: 'update',
+      detail: { turn: 5, changes: [{ kind: 'commitment', op: 'lapsed', to: '把文档里那条错命令改掉' }] },
+    })
+    writeFileSync(api.paths.audit, `${line}\n`, 'utf8')
+    registerSurface({ ctx, api, paths: api.paths, log: () => {} })
+
+    const scan = commands[0].handler({ rawInput: 'ledger scan' })
+    assert.equal(scan.kind, 'success')
+    assert.match(scan.text, /新捞到 1 条过期承诺/u)
+    assert.match(scan.text, /把文档里那条错命令改掉/u)
+
+    const again = commands[0].handler({ rawInput: 'ledger scan' })
+    assert.match(again.text, /本来就有，没有新增/u, '重扫不重复写，也不重复说')
+
+    const list = commands[0].handler({ rawInput: 'ledger handoffs' })
+    assert.match(list.text, /还欠着的交接：1 条/u)
+    rmSync(vault, { recursive: true, force: true })
   })
 
   it('导入报告传进来就往台账补一行，判断/结果/教训留空等隔天补', () => {
@@ -667,7 +763,7 @@ describe('命令与工具', () => {
     registerSurface({ ctx, api, paths: api.paths, log: () => {} })
     const tool = tools.find((item) => item.name === 'whale_pal_ledger')
     assert.ok(tool, '台账工具要在')
-    assert.deepEqual(tool.parameters.properties.action.enum, ['status', 'preview', 'event', 'fill', 'deviation', 'dissent', 'settle'])
+    assert.deepEqual(tool.parameters.properties.action.enum, ['status', 'scan', 'event', 'fill', 'deviation', 'dissent', 'settle'])
     assert.deepEqual(tool.parameters.properties.type.enum, ['任务', '纠正', '偏好', '观察'])
 
     const fifth = await tool.execute({ action: 'event', type: '第五种', what: '试试' }, {})

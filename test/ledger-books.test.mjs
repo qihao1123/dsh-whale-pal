@@ -11,7 +11,6 @@ import {
   EVENT_TYPES,
   HANDOFF_IGNORED,
   HANDOFF_OPEN,
-  REMINDER_PENDING,
   appendRow,
   bookOf,
   findByKey,
@@ -31,16 +30,17 @@ function added(cells, text = '') {
   return done;
 }
 
-describe('台账 · 五本账的口径', () => {
-  it('五本账齐、文件名与人可读的列都在', () => {
+describe('台账 · 四本账的口径', () => {
+  it('四本账齐、文件名与人可读的列都在', () => {
     assert.deepEqual(
       BOOKS.map((book) => book.name),
-      ['事件', '偏离', '异议', '待交接', '待提醒'],
+      ['事件', '偏离', '异议', '待交接'],
     );
     assert.deepEqual(bookOf('事件').columns, ['时间', '类型', '发生了什么', '当时的判断', '结果', '教训']);
-    assert.deepEqual(bookOf('待提醒').columns, ['时间', '键', '提醒什么', '状态']);
+    assert.deepEqual(bookOf('待交接').columns, ['时间', '键', '答应过的事', '状态']);
     assert.equal(bookOf('事件.md').name, '事件');
     assert.equal(bookOf('没有这本'), null);
+    assert.equal(bookOf('待提醒'), null, '第五本随节律一起砍了');
   });
 
   it('骨架是一张空表加说明行，说明不参与数据行', () => {
@@ -202,13 +202,6 @@ describe('台账 · 另外三本账', () => {
   it('待交接：行里自带键列，人的话看不出来也不影响', () => {
     const first = appendRow({ book: '待交接', text: '', cells: { 时间: '2026-11-04', 键: 'lapse:1#0', 答应过的事: '把文档里那条错命令改掉' } });
     assert.deepEqual(rowsOf('待交接', first.text)[0].cells, ['2026-11-04', 'lapse:1#0', '把文档里那条错命令改掉', HANDOFF_OPEN]);
-  });
-
-  it('待提醒：同一个周期键只一行，默认待报', () => {
-    const cells = { 时间: '2026-11-05T09:00', 键: 'day:2026-11-05', 提醒什么: '今天 2026-11-05：没有欠着的事' };
-    const first = appendRow({ book: '待提醒', text: '', cells });
-    assert.deepEqual(rowsOf('待提醒', first.text)[0].cells[3], REMINDER_PENDING);
-    assert.equal(appendRow({ book: '待提醒', text: first.text, cells }).skipped, true);
   });
 
   it('偏离与异议：四列/五列，缺的格先落待补', () => {
