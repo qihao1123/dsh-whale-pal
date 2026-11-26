@@ -6,13 +6,15 @@
  * 侧栏就多一条点进去是空的。所以兜底那一条单独测。
  */
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 
 import { COPY } from '../lib/copy.js'
 import {
+  CHIEF_INSTRUCTION,
+  CHIEF_INSTRUCTION_FILE,
   CHIEF_WORKSPACE_NAME,
   DISPATCH_DOC_DIR,
   DISPATCH_PERMISSIONS,
@@ -22,6 +24,7 @@ import {
   runDispatch,
   safeName,
   taskDocPath,
+  writeChiefInstruction,
 } from '../lib/dispatch.js'
 
 function tempDir(name) {
@@ -143,6 +146,34 @@ describe('ensureWorkspace', () => {
       throw new Error('撞名')
     }
     await assert.rejects(() => ensureWorkspace(host.registry, 'D:\\项目', '项目'), /撞名/)
+  })
+})
+
+describe('writeChiefInstruction', () => {
+  it('目录里没有就写一份，内容说清「只判断和派活」', () => {
+    const dir = tempDir('chief-write')
+    assert.equal(writeChiefInstruction(dir), 'written')
+    const text = readFileSync(join(dir, CHIEF_INSTRUCTION_FILE), 'utf8')
+    assert.equal(text, CHIEF_INSTRUCTION)
+    assert.match(text, /只判断、只派活/)
+    assert.match(text, /whale_pal_dispatch/)
+  })
+
+  it('已经有一份就一个字不动——人可能改过', () => {
+    const dir = tempDir('chief-keep')
+    const file = join(dir, CHIEF_INSTRUCTION_FILE)
+    writeFileSync(file, '# 我自己写的\n', 'utf8')
+    assert.equal(writeChiefInstruction(dir), 'kept')
+    assert.equal(readFileSync(file, 'utf8'), '# 我自己写的\n')
+  })
+
+  it('写不进去返回 failed，不抛', () => {
+    const dir = join(tempDir('chief-fail'), '不存在的一层')
+    assert.equal(writeChiefInstruction(dir), 'failed')
+  })
+
+  it('文件名是 DSH 认的那个', () => {
+    assert.equal(CHIEF_INSTRUCTION_FILE, 'AGENTS.md')
   })
 })
 

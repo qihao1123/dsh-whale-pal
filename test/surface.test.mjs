@@ -308,6 +308,39 @@ describe('设置路由', () => {
     assert.equal(result.json.chief.path, join(root, '指挥部'))
     assert.deepEqual(created, [{ path: join(root, '指挥部'), title: '指挥部' }])
     assert.equal(existsSync(join(root, '指挥部')), true, '目录也要真建出来')
+    // 职责说明跟着目录一起落：会话一开就知道自己干什么，不用人交代。
+    assert.equal(result.json.chief.instruction, 'written')
+    assert.match(readFileSync(join(root, '指挥部', 'AGENTS.md'), 'utf8'), /只判断、只派活/)
+  })
+
+  it('POST /settings 再存一次：指挥部里人改过的职责说明不被覆盖', async () => {
+    const { ctx } = makeCtx()
+    const api = makeApi()
+    const root = mkdtempSync(join(tmpdir(), 'whale-chief-again-'))
+    ctx.workspaceRegistry = {
+      async resolveByPath(path) {
+        return { id: 'ws-1', path, title: '指挥部' }
+      },
+      async create() {
+        throw new Error('不该新建')
+      },
+    }
+    const surface = registerSurface({ ctx, api, paths: api.paths, log: () => {} })
+    const first = await callRoute(surface.handler, {
+      url: '/api/whale-pal/settings',
+      method: 'POST',
+      body: { workRoot: root },
+    })
+    assert.equal(first.json.chief.instruction, 'written')
+    const file = join(root, '指挥部', 'AGENTS.md')
+    writeFileSync(file, '# 我的规矩\n', 'utf8')
+    const again = await callRoute(surface.handler, {
+      url: '/api/whale-pal/settings',
+      method: 'POST',
+      body: { workRoot: root },
+    })
+    assert.equal(again.json.chief.instruction, 'kept')
+    assert.equal(readFileSync(file, 'utf8'), '# 我的规矩\n')
   })
 
   it('POST /settings 存总路径：宿主没给注册表时保存照样成，只回报没建成', async () => {
