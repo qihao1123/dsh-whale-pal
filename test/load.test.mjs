@@ -272,6 +272,43 @@ describe('运行时那一行', () => {
     assert.match(runtime.summary, /还没有审计数据/)
   })
 
+  it('名额按池子算：两个池子加起来超了也不算顶满（复评 P1 误报）', () => {
+    // 名额是按池子给的（schema 走 trimToPoolCaps），所以 2 池各 150 条、总数 300 > 200 也不是顶满。
+    // 以前拿总数去比单池名额，这里就会喊「顶满」——那是误报。
+    const facts = [
+      ...Array.from({ length: 150 }, (_, i) => ({ text: `甲${i}`, scene: 'work:general' })),
+      ...Array.from({ length: 150 }, (_, i) => ({ text: `乙${i}`, scene: 'work:p1' })),
+    ]
+    const state = {
+      memory: { facts, preferences: [], events: [], openTopics: [] },
+      longMemory: [],
+      commitments: [],
+    }
+    const runtime = runtimeReport({ auditFile: join(tempDir(), 'absent.jsonl'), state })
+    const row = runtime.memory.find((item) => item.key === 'facts')
+    assert.equal(row.used, 300, '总数还是要照实念，人得知道占了多少')
+    assert.equal(row.pools, 2)
+    assert.equal(row.worst, 150, '最多的一池是 150')
+    assert.equal(row.full, false, '没有哪个池到 200，不该说顶满')
+    assert.match(runtime.summary, /facts 300\/200（2 池，最多一池 150\/200）/)
+    assert.doesNotMatch(runtime.summary, /顶满/)
+  })
+
+  it('真有一个池到顶还是照报，并点名是哪个池', () => {
+    const facts = [
+      ...Array.from({ length: 200 }, (_, i) => ({ text: `甲${i}`, scene: 'work:general' })),
+      ...Array.from({ length: 3 }, (_, i) => ({ text: `乙${i}`, scene: 'work:p1' })),
+    ]
+    const state = {
+      memory: { facts, preferences: [], events: [], openTopics: [] },
+      longMemory: [],
+      commitments: [],
+    }
+    const runtime = runtimeReport({ auditFile: join(tempDir(), 'absent.jsonl'), state })
+    assert.equal(runtime.memory.find((item) => item.key === 'facts').full, true)
+    assert.match(runtime.summary, /顶满：facts（work:general）/)
+  })
+
   it('健康报告默认不带 runtime，问了才算', () => {
     const paths = goodPaths()
     assert.equal(loadReport({ paths, registered }).runtime, undefined)

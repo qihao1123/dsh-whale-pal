@@ -131,6 +131,27 @@ describe('健康检查', () => {
     assert.match(mounted.detail, /sections 3/)
   })
 
+  it('派活工具不再收权限参数：那一档只能由人点，模型自己填不了', () => {
+    const { ctx, tools } = makeCtx()
+    const api = makeApi()
+    registerSurface({ ctx, api, paths: api.paths, log: () => {} })
+    const tool = tools.find((item) => item.name === 'whale_pal_dispatch')
+    assert.ok(tool, '派活工具要挂上')
+    assert.deepEqual(Object.keys(tool.parameters.properties).sort(), [
+      'brief',
+      'doc',
+      'overwrite',
+      'project',
+      'task',
+    ])
+    assert.equal(tool.parameters.properties.permission, undefined, '权限不能是入参：模型自己填就没有闸了')
+    assert.deepEqual(tool.parameters.required, ['project', 'task'])
+    assert.match(tool.description, /asks the user directly/)
+    assert.match(tool.description, /do not ask the user about permission yourself/)
+    // 人要是不点，工具就得等到超时——给足 5 分钟，别在递条子这一步被掐掉。
+    assert.equal(tool.timeoutMs, 300000)
+  })
+
   it('库版本不进工具了：/status 那一格还在，版本号仍从台账那一行读', async () => {
     const { ctx, routes } = makeCtx()
     const api = makeApi()
